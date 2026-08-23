@@ -1,0 +1,12 @@
+.git
+__pycache__/
+*.pyc
+.venv/
+venv/
+# generated review/analysis artifacts — not needed in the image
+facts*.json
+scored*.csv
+pr*_review.*
+invariants_report.md
+invariants.discovered.json
+.DS_Store
