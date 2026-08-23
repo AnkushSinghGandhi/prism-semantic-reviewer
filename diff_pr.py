@@ -16,11 +16,12 @@ import os
 import sys
 import tempfile
 import shutil
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from extractor import analyze_repo  # noqa: E402
-from gitutil import sh, export      # noqa: E402
-import enforce as enforce_mod       # noqa: E402
+from extractor import analyze_repo             # noqa: E402
+from gitutil import sh, export, ensure_local   # noqa: E402
+import enforce as enforce_mod                  # noqa: E402
 
 CRIT, HIGH, MED, LOW = "🔴", "🟠", "🟡", "🟢"
 EDGES = [("e3_db_tables", "db"), ("e4_external", "external"),
@@ -261,6 +262,34 @@ def build_review(changes, findings, meta):
             "changes": [cd(c) for c in changes]}
 
 
+def _gh_owner_repo(url):
+    """owner/repo from https://github.com/owner/repo(.git) or git@github.com:owner/repo.git"""
+    u = url.rstrip("/")
+    if u.endswith(".git"):
+        u = u[:-4]
+    if u.startswith("git@"):
+        u = u.split(":", 1)[1]
+    elif "github.com/" in u:
+        u = u.split("github.com/", 1)[1]
+    parts = u.split("/")
+    return parts[-2], parts[-1]
+
+
+def resolve_github_pr(url, local, n):
+    """Look up a real GitHub PR: return (base_sha, head_sha, title). Fetches the PR head ref."""
+    owner, repo = _gh_owner_repo(url)
+    api = f"https://api.github.com/repos/{owner}/{repo}/pulls/{n}"
+    req = urllib.request.Request(api, headers={"Accept": "application/vnd.github+json",
+                                               "User-Agent": "prism"})
+    tok = os.environ.get("GITHUB_TOKEN")
+    if tok:
+        req.add_header("Authorization", f"Bearer {tok}")
+    data = json.load(urllib.request.urlopen(req, timeout=30))
+    # make sure both commits exist locally (PR head may live on a fork)
+    sh("git", "-C", local, "fetch", "--quiet", "origin", f"pull/{n}/head")
+    return data["base"]["sha"], data["head"]["sha"], f"PR #{n}: {data.get('title', '')}"
+
+
 def resolve_refs(repo, merge=None, base=None, head=None):
     if merge:
         b = sh("git", "-C", repo, "rev-parse", "--short", f"{merge}^1")
@@ -274,7 +303,8 @@ def resolve_refs(repo, merge=None, base=None, head=None):
 
 
 def list_merges(repo, n=30):
-    """Recent merge PRs for the picker: [{sha, title, shortstat}]."""
+    """Recent merge PRs for the picker: [{sha, title, shortstat}]. Accepts a local path or URL."""
+    repo = ensure_local(repo)
     out = []
     for line in sh("git", "-C", repo, "log", "--merges", "--pretty=%h\t%s", f"-{n}").splitlines():
         sha, _, title = line.partition("\t")
@@ -284,9 +314,20 @@ def list_merges(repo, n=30):
     return out
 
 
-def run_review(repo, base=None, head=None, merge=None, invariants_path=None):
-    """Full review pipeline as a function (used by the CLI and the web service)."""
-    b, h, title = resolve_refs(repo, merge, base, head)
+def run_review(repo, base=None, head=None, merge=None, pr=None, invariants_path=None):
+    """Full review pipeline as a function (used by the CLI and the web service).
+
+    `repo` may be a local path or a git URL (cloned/cached automatically). `pr` reviews a real
+    GitHub pull request by number.
+    """
+    url = repo
+    repo = ensure_local(repo)
+    title = None
+    if pr:
+        base, head, title = resolve_github_pr(url, repo, pr)
+        merge = None
+    b, h, ttl = resolve_refs(repo, merge, base, head)
+    title = title or ttl
     shortstat = sh("git", "-C", repo, "diff", "--shortstat", b, h)
     tb, th = tempfile.mkdtemp(), tempfile.mkdtemp()
     try:
@@ -314,11 +355,13 @@ def write_html(review, path):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("repo")
-    ap.add_argument("--merge")
+    ap = argparse.ArgumentParser(
+        description="Semantic review of a PR. `repo` may be a local path or a git URL.")
+    ap.add_argument("repo", help="local path OR git URL (https://github.com/owner/repo)")
+    ap.add_argument("--merge", help="review a merge commit (base=^1, head=^2)")
     ap.add_argument("--base")
     ap.add_argument("--head")
+    ap.add_argument("--pr", help="review a GitHub PR by number (needs a GitHub URL repo)")
     ap.add_argument("--out", default="pr_review.md")
     ap.add_argument("--invariants", help="confirmed invariant corpus JSON to enforce")
     ap.add_argument("--json", dest="json_out", help="write structured review JSON")
@@ -328,7 +371,7 @@ def main():
     args = ap.parse_args()
 
     res = run_review(args.repo, base=args.base, head=args.head, merge=args.merge,
-                     invariants_path=args.invariants)
+                     pr=args.pr, invariants_path=args.invariants)
     review, report, findings, changes = res["review"], res["report"], res["findings"], res["changes"]
     open(args.out, "w").write(report)
     print(report)

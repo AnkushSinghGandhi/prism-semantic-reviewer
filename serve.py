@@ -56,10 +56,10 @@ def make_handler(defaults):
                 if u.path == "/api/review":
                     repo = g("repo") or defaults["repo"]
                     inv = g("invariants") or defaults["invariants"] or None
-                    key = (repo, g("merge"), g("base"), g("head"), inv)
+                    key = (repo, g("merge"), g("base"), g("head"), g("pr"), inv)
                     if key not in CACHE:
                         res = diff_pr.run_review(repo, base=g("base"), head=g("head"),
-                                                 merge=g("merge"), invariants_path=inv)
+                                                 merge=g("merge"), pr=g("pr"), invariants_path=inv)
                         CACHE[key] = res["review"]
                     return self._json(200, CACHE[key])
                 return self._json(404, {"error": "not found"})

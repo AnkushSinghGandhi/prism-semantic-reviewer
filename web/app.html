@@ -58,15 +58,16 @@
 <header>
   <h1>Semantic Review <span style="color:var(--mut);font-weight:400">— live</span></h1>
   <div class="bar">
-    <input id="repo" placeholder="/path/to/django-repo">
+    <input id="repo" placeholder="/path/to/repo  or  https://github.com/owner/repo">
     <button onclick="loadPRs()">Load PRs</button>
     <select id="pr"><option value="">— pick a merged PR —</option></select>
     <button onclick="review()">Review</button>
     <span class="mono" style="color:var(--mut)">or</span>
-    <input id="base" style="min-width:120px" placeholder="base sha">
-    <input id="head" style="min-width:120px" placeholder="head sha">
+    <input id="prnum" style="min-width:90px" placeholder="GitHub PR #">
+    <input id="base" style="min-width:110px" placeholder="base sha">
+    <input id="head" style="min-width:110px" placeholder="head sha">
   </div>
-  <div class="sub" id="status">Enter a repo path and load its PRs.</div>
+  <div class="sub" id="status">Enter a local path or a GitHub URL, then load its PRs.</div>
   <div class="tally" id="tally"></div>
 </header>
 <div id="invwrap"></div>
@@ -102,12 +103,13 @@ async function loadPRs(){
 async function review(){
   const repo=document.getElementById("repo").value.trim();
   const merge=document.getElementById("pr").value;
+  const pr=document.getElementById("prnum").value.trim();
   const base=document.getElementById("base").value.trim();
   const head=document.getElementById("head").value.trim();
-  if(!repo||(!merge&&!(base&&head))){status("Need a repo and (a PR or base+head).");return;}
-  status("Analyzing base & head snapshots… (a few seconds)");
+  if(!repo||(!merge&&!pr&&!(base&&head))){status("Need a repo and (a PR, a GitHub PR #, or base+head).");return;}
+  status(pr?`Fetching GitHub PR #${pr} and analyzing… (may clone on first use)`:"Analyzing base & head snapshots… (a few seconds)");
   try{
-    const d=await (await fetch("/api/review?"+qs({repo,merge,base,head}))).json();
+    const d=await (await fetch("/api/review?"+qs({repo,merge,pr,base,head}))).json();
     if(d.error){status("Error: "+d.error);return;}
     DATA=d; sel=null; render();
     status(`${DATA.base} → ${DATA.head} · ${DATA.shortstat||""}`);

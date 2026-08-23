@@ -101,6 +101,8 @@ semantic-review/
 
 - **Python 3.9+** (tested on 3.10) — **no pip packages needed**, standard library only.
 - **git** and **tar** (used to snapshot a commit without touching your working copy).
+- To review a **GitHub URL / PR**: network access; optionally `GITHUB_TOKEN` in the environment
+  (needed for private repos and to avoid API rate limits). Local repos need none of this.
 - For posting PR comments in CI: the **`gh`** CLI (already present on GitHub runners).
 - The code it analyzes should be **Django / Django REST Framework** (it understands Django URLs,
   the ORM, DRF permissions, Celery, and signals).
@@ -132,17 +134,30 @@ anything else. Good for a first look and for measuring how well it "sees" your c
 
 ### 2. Review a pull request (the main use)
 
+The repo can be a **local path or a GitHub URL** — a URL is cloned into a cache (`~/.cache/prism`)
+and reused on later runs, so you don't have to clone anything by hand.
+
 By merge commit:
 
 ```bash
 python3 diff_pr.py /path/to/repo --merge <merge-commit-sha>
 ```
 
-…or by two refs (this is what CI uses):
+By two refs (this is what CI uses):
 
 ```bash
 python3 diff_pr.py /path/to/repo --base <base-sha> --head <head-sha>
 ```
+
+Straight from GitHub — by URL, and even by real PR number:
+
+```bash
+python3 diff_pr.py https://github.com/owner/repo --pr 481
+python3 diff_pr.py https://github.com/owner/repo --merge <sha>
+```
+
+`--pr` looks up the PR's base and head via the GitHub API (set `GITHUB_TOKEN` to avoid rate
+limits / for private repos) and fetches the PR head automatically.
 
 You get a ranked review — **🔴 security/data-flow · 🟠 money/payment · 🟡 new write/external ·
 🟢 read-only or pure refactor** — and for each item: *why it matters*, the *flow*, the exact
@@ -211,7 +226,8 @@ python3 serve.py --repo /path/to/repo --invariants invariants.confirmed.json
 
 It's a normal web app (still zero dependencies — Python's built-in server):
 
-- enter a repo path, click **Load PRs**, pick a merged PR (or type a base + head), hit **Review**;
+- enter a **local path or a GitHub URL**, click **Load PRs**, pick a merged PR (or type a
+  **GitHub PR #**, or a base + head), hit **Review**;
 - the analysis runs on demand (a few seconds) and is cached;
 - you get the ranked change list, the invariant panel, and — the new part — an **interactive
   flow graph** for each change: a node-link diagram showing `route → handler → tables / external
