@@ -275,29 +275,53 @@ def _gh_owner_repo(url):
     return parts[-2], parts[-1]
 
 
-def resolve_github_pr(url, local, n):
-    """Look up a real GitHub PR: return (base_sha, head_sha, title). Fetches the PR head ref."""
-    owner, repo = _gh_owner_repo(url)
-    api = f"https://api.github.com/repos/{owner}/{repo}/pulls/{n}"
+def _github_json(api):
     req = urllib.request.Request(api, headers={"Accept": "application/vnd.github+json",
                                                "User-Agent": "prism"})
     tok = os.environ.get("GITHUB_TOKEN")
     if tok:
         req.add_header("Authorization", f"Bearer {tok}")
-    data = json.load(urllib.request.urlopen(req, timeout=30))
-    # make sure both commits exist locally (PR head may live on a fork)
-    sh("git", "-C", local, "fetch", "--quiet", "origin", f"pull/{n}/head")
-    return data["base"]["sha"], data["head"]["sha"], f"PR #{n}: {data.get('title', '')}"
+    return json.load(urllib.request.urlopen(req, timeout=30))
+
+
+def _is_github_url(repo):
+    return "github.com/" in repo or repo.startswith("git@github.com:")
+
+
+def resolve_github_pr(url, local, n):
+    """Look up a real GitHub PR: return (base_sha, head_sha, title). Fetches the PR head ref."""
+    if not _is_github_url(url):
+        raise RuntimeError("--pr requires a GitHub repo URL so Prism can look up the PR metadata")
+    owner, repo = _gh_owner_repo(url)
+    api = f"https://api.github.com/repos/{owner}/{repo}/pulls/{n}"
+    data = _github_json(api)
+    base_sha, head_sha = data["base"]["sha"], data["head"]["sha"]
+
+    def fetch_ref(label, local_ref, *refs):
+        last = ""
+        for ref in refs:
+            try:
+                sh("git", "-C", local, "fetch", "--quiet", "--no-tags",
+                   "origin", f"{ref}:{local_ref}", check=True)
+                return
+            except RuntimeError as e:
+                last = str(e)
+        raise RuntimeError(f"could not fetch GitHub PR {n} {label}: {last}")
+
+    # Fetch only the commits needed for this PR into local refs so git archive can find them.
+    fetch_ref("base", "refs/prism/base", base_sha, data["base"]["ref"])
+    fetch_ref("head", "refs/prism/head", f"pull/{n}/head", head_sha)
+    return base_sha, head_sha, f"PR #{n}: {data.get('title', '')}"
 
 
 def resolve_refs(repo, merge=None, base=None, head=None):
     if merge:
-        b = sh("git", "-C", repo, "rev-parse", "--short", f"{merge}^1")
-        h = sh("git", "-C", repo, "rev-parse", "--short", f"{merge}^2")
-        title = sh("git", "-C", repo, "log", "-1", "--pretty=%s", merge)
+        b = sh("git", "-C", repo, "rev-parse", "--short", f"{merge}^1", check=True)
+        h = sh("git", "-C", repo, "rev-parse", "--short", f"{merge}^2", check=True)
+        title = sh("git", "-C", repo, "log", "-1", "--pretty=%s", merge, check=True)
     else:
-        b = sh("git", "-C", repo, "rev-parse", "--short", base)
-        h = sh("git", "-C", repo, "rev-parse", "--short", head)
+        b = sh("git", "-C", repo, "rev-parse", "--short", base, check=True)
+        h = sh("git", "-C", repo, "rev-parse", "--short", head, check=True)
         title = f"{b}..{h}"
     return b, h, title
 
@@ -305,15 +329,38 @@ def resolve_refs(repo, merge=None, base=None, head=None):
 def list_merges(repo, n=30):
     """Recent merge PRs for the picker: [{sha, title}]. Accepts a local path or URL.
 
-    Deliberately does NOT compute per-PR shortstat (that was N extra git calls and made the
-    picker slow/hang on big repos) — the real line diff is shown once a PR is reviewed.
+    GitHub URLs use the API so squash/rebase/linear histories still show PRs. Local paths fall
+    back to merge commits because local git history has no portable PR-number metadata.
     """
+    if _is_github_url(repo):
+        owner, name = _gh_owner_repo(repo)
+        out = []
+        per_page = min(max(n * 3, 30), 100)
+        try:
+            for page in range(1, 6):
+                api = (f"https://api.github.com/repos/{owner}/{name}/pulls"
+                       f"?state=closed&sort=updated&direction=desc&per_page={per_page}&page={page}")
+                pulls = _github_json(api)
+                if not pulls:
+                    break
+                for pr in pulls:
+                    if not pr.get("merged_at"):
+                        continue
+                    sha = (pr.get("merge_commit_sha") or "")[:12]
+                    out.append({"kind": "pr", "number": str(pr["number"]), "sha": sha,
+                                "title": f"PR #{pr['number']}: {pr.get('title') or '(untitled)'}"})
+                    if len(out) >= n:
+                        return out
+        except Exception as e:
+            raise RuntimeError(f"GitHub PR lookup failed for {owner}/{name}: {e}")
+        return out
+
     repo = ensure_local(repo)
     out = []
     for line in sh("git", "-C", repo, "log", "--merges", "--pretty=%h\t%s", f"-{n}").splitlines():
         sha, _, title = line.partition("\t")
         if "pull request" in title or "Merge" in title:
-            out.append({"sha": sha, "title": title})
+            out.append({"kind": "merge", "sha": sha, "title": title})
     return out
 
 
@@ -324,7 +371,7 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, invariants_path=
     GitHub pull request by number.
     """
     url = repo
-    repo = ensure_local(repo)
+    repo = ensure_local(repo, update=not pr)
     title = None
     if pr:
         base, head, title = resolve_github_pr(url, repo, pr)

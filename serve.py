@@ -67,6 +67,9 @@ def make_handler(cfg):
                 path = path[len(bp):] or "/"
             try:
                 if path in ("/", "/index.html", ""):
+                    return self._send(200, open(os.path.join(HERE, "web", "index.html"), "rb").read(),
+                                      "text/html; charset=utf-8")
+                if path == "/app":
                     return self._send(200, open(os.path.join(HERE, "web", "app.html"), "rb").read(),
                                       "text/html; charset=utf-8")
                 if path == "/healthz":

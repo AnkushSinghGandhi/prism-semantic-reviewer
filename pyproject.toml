@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prism-reviewer"
+version = "0.1.0"
+description = "Semantic PR Reviewer for Python Web Applications"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "Prism Contributors" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/AnkushSinghGandhi/prism"
+Repository = "https://github.com/AnkushSinghGandhi/prism"
+
+[project.scripts]
+prism = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli", "diff_pr", "serve", "gitutil", "extractor", "enforce", "invariants"]
+packages = ["web"]
+package-data = { "web" = ["app.html", "viewer.template.html", "index.html"] }
