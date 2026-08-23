@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semantic Review</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#e6edf3; --mut:#8b949e;
+    --crit:#f85149; --high:#db8f2b; --med:#d0b429; --low:#3fb950; --link:#58a6ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{padding:16px 22px;border-bottom:1px solid var(--line)}
+  header h1{margin:0 0 4px;font-size:17px}
+  header .sub{color:var(--mut);font-size:12.5px}
+  .tally{margin-top:8px;display:flex;gap:14px;font-size:12.5px}
+  .tally b{font-weight:600}
+  .inv{margin:14px 22px 0;border:1px solid var(--crit);border-radius:8px;
+       background:rgba(248,81,73,.08)}
+  .inv h2{margin:0;padding:10px 14px;font-size:13.5px;border-bottom:1px solid var(--line)}
+  .inv .row{padding:9px 14px;border-bottom:1px solid var(--line)}
+  .inv .row:last-child{border-bottom:0}
+  .inv .stmt{font-weight:600}
+  .inv .det{color:var(--mut);font-size:12.5px;margin-top:2px}
+  main{display:grid;grid-template-columns:minmax(340px,420px) 1fr;gap:0;
+       height:calc(100vh - 150px)}
+  #list{border-right:1px solid var(--line);overflow:auto}
+  .filters{padding:10px 14px;border-bottom:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap}
+  .filters button{background:var(--panel);color:var(--fg);border:1px solid var(--line);
+    border-radius:14px;padding:3px 10px;cursor:pointer;font-size:12px}
+  .filters button.off{opacity:.4}
+  .item{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:9px}
+  .item:hover{background:var(--panel)}
+  .item.sel{background:#1f2937;border-left:3px solid var(--link);padding-left:11px}
+  .dot{width:9px;height:9px;border-radius:50%;margin-top:6px;flex:0 0 auto}
+  .item .kind{font-size:10.5px;letter-spacing:.4px;color:var(--mut);text-transform:uppercase}
+  .item .route{word-break:break-all}
+  #detail{overflow:auto;padding:20px 24px}
+  #detail .empty{color:var(--mut);margin-top:40px;text-align:center}
+  #detail h2{font-size:16px;margin:0 0 4px}
+  .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;
+    border:1px solid var(--line);margin-left:6px;vertical-align:middle}
+  .sec{margin-top:20px}
+  .sec .h{font-size:11px;letter-spacing:.6px;color:var(--mut);text-transform:uppercase;margin-bottom:7px}
+  .flow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+  .flow .node{background:var(--panel);border:1px solid var(--line);border-radius:6px;
+    padding:3px 9px}.flow .arr{color:var(--mut)}
+  .invest{list-style:none;margin:0;padding:0}
+  .invest li{padding:7px 10px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;
+    display:flex;justify-content:space-between;gap:12px;align-items:center}
+  .invest .where{color:var(--link)}.invest .fact{color:var(--mut);font-size:12.5px}
+  .unk{color:var(--high);font-size:12.5px;background:rgba(219,143,43,.08);
+    border:1px solid rgba(219,143,43,.3);border-radius:6px;padding:8px 10px;margin-bottom:6px}
+  .why{font-size:14.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <div class="sub" id="sub"></div>
+  <div class="tally" id="tally"></div>
+</header>
+<div id="invwrap"></div>
+<main>
+  <div id="list"><div class="filters" id="filters"></div><div id="items"></div></div>
+  <div id="detail"><div class="empty">Select a change to see how it flows and where to look.</div></div>
+</main>
+<script>
+const DATA = __REVIEW_DATA__;
+const SEV = {"🔴":"crit","🟠":"high","🟡":"med","🟢":"low"};
+const COL = {crit:"var(--crit)",high:"var(--high)",med:"var(--med)",low:"var(--low)"};
+const active = new Set(["🔴","🟠","🟡","🟢"]);
+
+document.getElementById("title").textContent = DATA.title;
+document.getElementById("sub").innerHTML =
+  `<span class="mono">${DATA.base} → ${DATA.head}</span> &nbsp;·&nbsp; line diff: ${DATA.shortstat||"—"}`;
+
+const counts = {};
+DATA.changes.forEach(c=>counts[c.sev]=(counts[c.sev]||0)+1);
+document.getElementById("tally").innerHTML =
+  ["🔴","🟠","🟡","🟢"].filter(s=>counts[s]).map(s=>`<span><b>${s} ${counts[s]}</b></span>`).join("")
+  + `<span style="color:var(--mut)">${DATA.changes.length} semantic changes</span>`;
+
+// invariants panel
+const alerts = (DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
+if(alerts.length){
+  const w = document.getElementById("invwrap");
+  w.innerHTML = `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
+    alerts.map(f=>`<div class="row"><div class="stmt">${f.sev} ${f.kind} — ${esc(f.stmt)}</div>`+
+      (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
+      (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")
+    + `</div>`;
+}
+
+// filters
+const fbar = document.getElementById("filters");
+["🔴","🟠","🟡","🟢"].forEach(s=>{
+  const b=document.createElement("button"); b.textContent=`${s} ${counts[s]||0}`;
+  b.onclick=()=>{active.has(s)?active.delete(s):active.add(s); b.classList.toggle("off"); renderList();};
+  fbar.appendChild(b);
+});
+
+let sel=null;
+function renderList(){
+  const box=document.getElementById("items"); box.innerHTML="";
+  DATA.changes.filter(c=>active.has(c.sev)).forEach((c)=>{
+    const idx=DATA.changes.indexOf(c);
+    const d=document.createElement("div"); d.className="item"+(sel===idx?" sel":"");
+    d.innerHTML=`<span class="dot" style="background:${COL[SEV[c.sev]]}"></span>`+
+      `<div><div class="kind">${c.kind}</div><div class="route mono">${esc(c.route)}</div></div>`;
+    d.onclick=()=>{sel=idx; renderList(); renderDetail(c);}; box.appendChild(d);
+  });
+}
+function renderDetail(c){
+  const flowNodes=c.flow.split(" → ").map(n=>`<span class="node mono">${esc(n)}</span>`)
+    .join('<span class="arr">→</span>');
+  const invest=c.investigate.map(i=>`<li><span class="where mono">${esc(i.where)}</span>`+
+    `<span class="fact">${esc(i.fact)}</span></li>`).join("");
+  const unk=(c.unknowns||[]).map(u=>`<div class="unk">${esc(u)}</div>`).join("");
+  document.getElementById("detail").innerHTML=
+    `<h2>${c.sev} ${esc(c.route)}<span class="badge">${c.kind}</span>`+
+      `<span class="badge">${esc(c.auth)}</span></h2>`+
+    `<div class="why">${esc(c.why)}</div>`+(c.detail?`<div class="det" style="color:var(--mut)">${esc(c.detail)}</div>`:"")+
+    `<div class="sec"><div class="h">How it flows</div><div class="flow">${flowNodes}</div></div>`+
+    `<div class="sec"><div class="h">Where to look</div><ul class="invest">${invest}</ul></div>`+
+    (unk?`<div class="sec"><div class="h">Unknown (unresolved edges)</div>${unk}</div>`:"");
+}
+function esc(s){return String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+renderList();
+</script>
+</body>
+</html>

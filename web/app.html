@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semantic Review — live</title>
+<style>
+  :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--fg:#e6edf3;--mut:#8b949e;
+    --crit:#f85149;--high:#db8f2b;--med:#d0b429;--low:#3fb950;--link:#58a6ff;--purple:#bc8cff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  header{padding:12px 18px;border-bottom:1px solid var(--line)}
+  header h1{margin:0 0 8px;font-size:16px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,select,button{background:var(--panel);color:var(--fg);border:1px solid var(--line);
+    border-radius:6px;padding:6px 9px;font-size:13px}
+  input{min-width:340px}select{min-width:340px;max-width:520px}
+  button{cursor:pointer}button:hover{border-color:var(--link)}
+  .sub{color:var(--mut);font-size:12.5px;margin-top:8px}
+  .tally{display:flex;gap:12px;margin-top:6px;font-size:12.5px}
+  .inv{margin:12px 18px 0;border:1px solid var(--crit);border-radius:8px;background:rgba(248,81,73,.08)}
+  .inv h2{margin:0;padding:9px 13px;font-size:13px;border-bottom:1px solid var(--line)}
+  .inv .row{padding:8px 13px;border-bottom:1px solid var(--line)}.inv .row:last-child{border-bottom:0}
+  .inv .det{color:var(--mut);font-size:12px;margin-top:2px}
+  main{display:grid;grid-template-columns:minmax(320px,400px) 1fr;height:calc(100vh - 132px)}
+  #list{border-right:1px solid var(--line);overflow:auto}
+  .filters{padding:9px 13px;border-bottom:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap}
+  .filters button{border-radius:14px;padding:3px 10px;font-size:12px}.filters button.off{opacity:.4}
+  .item{padding:10px 13px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:9px}
+  .item:hover{background:var(--panel)}.item.sel{background:#1f2937;border-left:3px solid var(--link);padding-left:10px}
+  .dot{width:9px;height:9px;border-radius:50%;margin-top:6px;flex:0 0 auto}
+  .item .kind{font-size:10px;letter-spacing:.4px;color:var(--mut);text-transform:uppercase}
+  .item .route{word-break:break-all}
+  #detail{overflow:auto;padding:16px 20px}
+  #detail .empty{color:var(--mut);text-align:center;margin-top:40px}
+  #detail h2{font-size:15px;margin:0 0 4px}
+  .badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;border:1px solid var(--line);margin-left:6px}
+  .tabs{display:flex;gap:6px;margin:14px 0 10px;border-bottom:1px solid var(--line)}
+  .tabs button{border:0;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 4px;color:var(--mut)}
+  .tabs button.on{color:var(--fg);border-bottom-color:var(--link)}
+  .invest{list-style:none;margin:0;padding:0}
+  .invest li{padding:7px 10px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;
+    display:flex;justify-content:space-between;gap:12px}
+  .invest .where{color:var(--link)}.invest .fact{color:var(--mut);font-size:12.5px}
+  .unk{color:var(--high);font-size:12.5px;background:rgba(219,143,43,.08);border:1px solid rgba(219,143,43,.3);
+    border-radius:6px;padding:8px 10px;margin-bottom:6px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--mut);margin-bottom:8px}
+  .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .lg-handler::before{background:var(--link)}.lg-read::before{background:#6e7681}.lg-write::before{background:var(--high)}
+  .lg-ext::before{background:var(--crit)}.lg-async::before{background:var(--purple)}
+  svg text{fill:var(--fg);font:12px ui-monospace,Menlo,monospace}
+  svg .elabel{fill:var(--mut);font-size:10px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Semantic Review <span style="color:var(--mut);font-weight:400">— live</span></h1>
+  <div class="bar">
+    <input id="repo" placeholder="/path/to/django-repo">
+    <button onclick="loadPRs()">Load PRs</button>
+    <select id="pr"><option value="">— pick a merged PR —</option></select>
+    <button onclick="review()">Review</button>
+    <span class="mono" style="color:var(--mut)">or</span>
+    <input id="base" style="min-width:120px" placeholder="base sha">
+    <input id="head" style="min-width:120px" placeholder="head sha">
+  </div>
+  <div class="sub" id="status">Enter a repo path and load its PRs.</div>
+  <div class="tally" id="tally"></div>
+</header>
+<div id="invwrap"></div>
+<main>
+  <div id="list"><div class="filters" id="filters"></div><div id="items"></div></div>
+  <div id="detail"><div class="empty">Run a review, then select a change.</div></div>
+</main>
+<script>
+const SEV={"🔴":"crit","🟠":"high","🟡":"med","🟢":"low"};
+const COL={crit:"var(--crit)",high:"var(--high)",med:"var(--med)",low:"var(--low)"};
+const active=new Set(["🔴","🟠","🟡","🟢"]);
+let DATA=null, sel=null, tab="graph";
+
+fetch("/api/config").then(r=>r.json()).then(c=>{if(c.repo)document.getElementById("repo").value=c.repo;});
+
+function qs(o){return Object.entries(o).filter(([,v])=>v).map(([k,v])=>k+"="+encodeURIComponent(v)).join("&");}
+function status(s){document.getElementById("status").textContent=s;}
+
+async function loadPRs(){
+  const repo=document.getElementById("repo").value.trim();
+  if(!repo){status("Enter a repo path first.");return;}
+  status("Loading PRs…");
+  try{
+    const d=await (await fetch("/api/prs?"+qs({repo}))).json();
+    if(d.error){status("Error: "+d.error);return;}
+    const sel=document.getElementById("pr");
+    sel.innerHTML='<option value="">— pick a merged PR —</option>'+
+      d.prs.map(p=>`<option value="${p.sha}">${esc(p.title)} · ${esc(p.shortstat||"")}</option>`).join("");
+    status(`Loaded ${d.prs.length} PRs. Pick one and hit Review (or use base/head).`);
+  }catch(e){status("Error: "+e);}
+}
+
+async function review(){
+  const repo=document.getElementById("repo").value.trim();
+  const merge=document.getElementById("pr").value;
+  const base=document.getElementById("base").value.trim();
+  const head=document.getElementById("head").value.trim();
+  if(!repo||(!merge&&!(base&&head))){status("Need a repo and (a PR or base+head).");return;}
+  status("Analyzing base & head snapshots… (a few seconds)");
+  try{
+    const d=await (await fetch("/api/review?"+qs({repo,merge,base,head}))).json();
+    if(d.error){status("Error: "+d.error);return;}
+    DATA=d; sel=null; render();
+    status(`${DATA.base} → ${DATA.head} · ${DATA.shortstat||""}`);
+  }catch(e){status("Error: "+e);}
+}
+
+function render(){
+  const counts={}; DATA.changes.forEach(c=>counts[c.sev]=(counts[c.sev]||0)+1);
+  document.getElementById("tally").innerHTML=
+    ["🔴","🟠","🟡","🟢"].filter(s=>counts[s]).map(s=>`<b>${s} ${counts[s]}</b>`).join("&nbsp;&nbsp;")
+    +`<span style="color:var(--mut)">${DATA.changes.length} semantic changes</span>`;
+  const alerts=(DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
+  document.getElementById("invwrap").innerHTML = alerts.length ?
+    `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
+    alerts.map(f=>`<div class="row"><div><b>${f.sev} ${f.kind}</b> — ${esc(f.stmt)}</div>`+
+      (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
+      (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")+`</div>` : "";
+  const fbar=document.getElementById("filters"); fbar.innerHTML="";
+  ["🔴","🟠","🟡","🟢"].forEach(s=>{const b=document.createElement("button");
+    b.textContent=`${s} ${counts[s]||0}`; if(!active.has(s))b.classList.add("off");
+    b.onclick=()=>{active.has(s)?active.delete(s):active.add(s);b.classList.toggle("off");renderList();};
+    fbar.appendChild(b);});
+  renderList();
+  document.getElementById("detail").innerHTML='<div class="empty">Select a change.</div>';
+}
+
+function renderList(){
+  const box=document.getElementById("items"); box.innerHTML="";
+  DATA.changes.forEach((c,idx)=>{ if(!active.has(c.sev))return;
+    const d=document.createElement("div"); d.className="item"+(sel===idx?" sel":"");
+    d.innerHTML=`<span class="dot" style="background:${COL[SEV[c.sev]]}"></span>`+
+      `<div><div class="kind">${c.kind}</div><div class="route mono">${esc(c.route)}</div></div>`;
+    d.onclick=()=>{sel=idx;renderList();renderDetail(c);}; box.appendChild(d);});
+}
+
+function renderDetail(c){
+  const d=document.getElementById("detail");
+  d.innerHTML=`<h2>${c.sev} ${esc(c.route)}<span class="badge">${c.kind}</span><span class="badge">${esc(c.auth)}</span></h2>`+
+    `<div>${esc(c.why)}</div>`+(c.detail?`<div style="color:var(--mut)">${esc(c.detail)}</div>`:"")+
+    `<div class="tabs"><button id="tg" class="${tab==='graph'?'on':''}" onclick="setTab('graph')">Flow graph</button>`+
+    `<button id="tw" class="${tab==='where'?'on':''}" onclick="setTab('where')">Where to look</button></div>`+
+    `<div id="tabbody"></div>`;
+  renderTab(c);
+}
+function setTab(t){tab=t;document.getElementById("tg").className=t==='graph'?'on':'';
+  document.getElementById("tw").className=t==='where'?'on':'';renderTab(DATA.changes[sel]);}
+
+function renderTab(c){
+  const b=document.getElementById("tabbody");
+  if(tab==="where"){
+    const invest=c.investigate.map(i=>`<li><span class="where mono">${esc(i.where)}</span><span class="fact">${esc(i.fact)}</span></li>`).join("");
+    const unk=(c.unknowns||[]).map(u=>`<div class="unk">${esc(u)}</div>`).join("");
+    b.innerHTML=`<ul class="invest">${invest}</ul>`+(unk?`<div style="margin-top:10px">${unk}</div>`:"");
+  }else{
+    b.innerHTML=`<div class="legend"><span class="lg-handler">handler</span><span class="lg-read">table read</span>`+
+      `<span class="lg-write">table write</span><span class="lg-ext">external</span><span class="lg-async">async</span></div>`+
+      drawGraph(c.graph);
+  }
+}
+
+// ---- SVG node-link graph (layered: route → handler → leaves) ----
+function drawGraph(g){
+  const byType=t=>g.nodes.filter(n=>n.type===t);
+  const route=byType("route"), handler=byType("handler");
+  const leaves=g.nodes.filter(n=>!["route","handler"].includes(n.type));
+  const rowH=42, top=20, colR=20, colH=250, colL=520, boxH=26;
+  const H=Math.max(handler.length*rowH, leaves.length*rowH)+top*2+10;
+  const yMid=H/2;
+  const pos={};
+  route.forEach(n=>pos[n.id]=[colR,yMid]);
+  handler.forEach(n=>pos[n.id]=[colH,yMid]);
+  leaves.forEach((n,i)=>pos[n.id]=[colL,top+boxH/2+i*rowH]);
+  const w=(lbl)=>Math.min(230,Math.max(70,lbl.length*7.2+18));
+  function nodeSvg(n){
+    const [x,y]=pos[n.id], ww=w(n.label);
+    let stroke="#6e7681", fill="var(--panel)";
+    if(n.type==="handler")stroke="var(--link)";
+    else if(n.type==="external")stroke="var(--crit)";
+    else if(n.type==="async")stroke="var(--purple)";
+    else if(n.type==="table")stroke=(n.kind||"").includes("write")?"var(--high)":"#6e7681";
+    else if(n.type==="route")stroke="#8b949e";
+    const pii=n.pii?`<circle cx="${x+ww-8}" cy="${y-boxH/2+2}" r="5" fill="var(--crit)"><title>PII source</title></circle>`:"";
+    const sub=n.type==="handler"&&n.auth?`<title>${esc(n.auth)}</title>`:(n.loc?`<title>${esc(n.loc)}</title>`:"");
+    return `<g>${sub}<rect x="${x}" y="${y-boxH/2}" width="${ww}" height="${boxH}" rx="6" `+
+      `fill="${fill}" stroke="${stroke}" stroke-width="1.6"/>`+
+      `<text x="${x+9}" y="${y+4}">${esc(clip(n.label,26))}</text>${pii}</g>`;
+  }
+  function edgeSvg(e){
+    const s=pos[e.from], t=pos[e.to]; if(!s||!t)return"";
+    const x1=s[0]+w(g.nodes.find(n=>n.id===e.from).label), y1=s[1], x2=t[0], y2=t[1];
+    const mx=(x1+x2)/2;
+    const col=e.kind&&e.kind.includes("write")?"var(--high)":
+      e.kind==="calls"?"var(--crit)":e.kind==="dispatches"?"var(--purple)":"#6e7681";
+    return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${col}" stroke-width="1.4" opacity=".8"/>`+
+      `<text class="elabel" x="${mx}" y="${(y1+y2)/2-3}" text-anchor="middle">${esc(e.kind||"")}</text>`;
+  }
+  const width=colL+240;
+  return `<svg width="100%" viewBox="0 0 ${width} ${H}" style="max-width:${width}px">`+
+    g.edges.map(edgeSvg).join("")+g.nodes.map(nodeSvg).join("")+`</svg>`;
+}
+
+function clip(s,n){return s.length>n?s.slice(0,n-1)+"…":s;}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+</script>
+</body>
+</html>
