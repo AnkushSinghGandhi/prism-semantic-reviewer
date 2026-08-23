@@ -1,0 +1,32 @@
+[
+  {
+    "id": "auth-before-write",
+    "statement": "Authenticated access before any DB write",
+    "kind": "near-miss",
+    "severity": "critical",
+    "scope": "all endpoints performing a DB write",
+    "baseline_exceptions": [],
+    "confirmed": true,
+    "owner": "platform-team"
+  },
+  {
+    "id": "pii-egress-authed",
+    "statement": "PII read + egress only on authenticated endpoints",
+    "kind": "near-miss",
+    "severity": "critical",
+    "scope": "endpoints reading PII with an egress path",
+    "baseline_exceptions": [],
+    "confirmed": true,
+    "owner": "security"
+  },
+  {
+    "id": "external-egress-allowlist",
+    "statement": "External/PII egress limited to approved destinations",
+    "kind": "boundary",
+    "severity": "critical",
+    "scope": "all outbound calls",
+    "observed": { "destinations": [] },
+    "confirmed": true,
+    "owner": "security"
+  }
+]
