@@ -66,7 +66,7 @@
     <span class="mono" style="color:var(--mut)">or browse:</span>
     <input id="repo" placeholder="/path/to/repo  or  https://github.com/owner/repo">
     <button onclick="loadPRs()">Load PRs</button>
-    <select id="pr"><option value="">— pick a merged PR —</option></select>
+    <select id="pr"><option value="">— pick a PR —</option></select>
     <button onclick="review()">Review</button>
     <span class="mono" style="color:var(--mut)">or</span>
     <input id="prnum" style="min-width:90px" placeholder="PR #">
@@ -125,16 +125,22 @@ async function loadPRs(){
   try{
     const d=await getJSON(apiURL("api/prs",{repo}));
     const sel=document.getElementById("pr");
-    sel.innerHTML='<option value="">— pick a merged PR —</option>'+
-      d.prs.map(p=>`<option value="${p.sha}">${esc(p.title)} · ${esc(p.shortstat||"")}</option>`).join("");
+    sel.innerHTML='<option value="">— pick a PR —</option>'+
+      d.prs.map(p=>{
+        const val=p.number?`pr:${p.number}`:`merge:${p.sha}`;
+        const meta=p.sha?` · ${p.sha}`:"";
+        return `<option value="${esc(val)}">${esc(p.title)}${esc(meta)}</option>`;
+      }).join("");
     status(`Loaded ${d.prs.length} PRs. Pick one and hit Review (or use base/head).`);
   }catch(e){status("Error: "+e);}
 }
 
 async function review(){
   const repo=document.getElementById("repo").value.trim();
-  const merge=document.getElementById("pr").value;
-  const pr=document.getElementById("prnum").value.trim();
+  const picked=document.getElementById("pr").value;
+  const pickedPR=picked.startsWith("pr:")?picked.slice(3):"";
+  const merge=(!pickedPR && picked)?(picked.startsWith("merge:")?picked.slice(6):picked):"";
+  const pr=document.getElementById("prnum").value.trim()||pickedPR;
   const base=document.getElementById("base").value.trim();
   const head=document.getElementById("head").value.trim();
   if(!repo||(!merge&&!pr&&!(base&&head))){status("Need a repo and (a PR, a GitHub PR #, or base+head).");return;}
