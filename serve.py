@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import diff_pr           # noqa: E402
-from gitutil import is_url  # noqa: E402
+from gitutil import is_url, git_toplevel  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = {}   # (repo, merge, base, head, pr, inv) -> review
@@ -66,10 +66,8 @@ def make_handler(cfg):
             if bp and path.startswith(bp):
                 path = path[len(bp):] or "/"
             try:
-                if path in ("/", "/index.html", ""):
-                    return self._send(200, open(os.path.join(HERE, "web", "index.html"), "rb").read(),
-                                      "text/html; charset=utf-8")
-                if path == "/app":
+                if path in ("/", "/index.html", "/app", "/app.html", ""):
+                    # `prism serve` goes straight to the usage page (the review UI)
                     return self._send(200, open(os.path.join(HERE, "web", "app.html"), "rb").read(),
                                       "text/html; charset=utf-8")
                 if path == "/healthz":
@@ -80,7 +78,8 @@ def make_handler(cfg):
 
                 if path == "/api/config":
                     return self._json(200, {"repo": cfg["repo"], "invariants": cfg["invariants"],
-                                            "locked": bool(cfg["allowed"])})
+                                            "locked": bool(cfg["allowed"]),
+                                            "preload": cfg["preload"]})
                 if path == "/api/prs":
                     repo = g("repo") or cfg["repo"]
                     if not repo:
@@ -93,10 +92,11 @@ def make_handler(cfg):
                     if not self._repo_ok(repo):
                         return self._json(403, {"error": "repo not in allowlist"})
                     inv = g("invariants") or cfg["invariants"] or None
-                    key = (repo, g("merge"), g("base"), g("head"), g("pr"), inv)
+                    key = (repo, g("merge"), g("base"), g("head"), g("pr"), g("commit"), inv)
                     if key not in CACHE:
                         res = diff_pr.run_review(repo, base=g("base"), head=g("head"),
-                                                 merge=g("merge"), pr=g("pr"), invariants_path=inv)
+                                                 merge=g("merge"), pr=g("pr"), commit=g("commit"),
+                                                 invariants_path=inv)
                         CACHE[key] = res["review"]
                     return self._json(200, CACHE[key])
                 return self._json(404, {"error": "not found"})
@@ -111,29 +111,54 @@ def _norm_repo(r):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--repo", default=os.environ.get("PRISM_DEFAULT_REPO", ""))
+    ap = argparse.ArgumentParser(description="Prism web UI. Run inside a git repo to auto-select it.")
+    ap.add_argument("--repo", default=os.environ.get("PRISM_DEFAULT_REPO", ""),
+                    help="repo path or URL (default: the git repo of the current directory)")
     ap.add_argument("--invariants", default=os.environ.get("PRISM_INVARIANTS", ""))
     ap.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
+    # preload a review straight into the UI:
+    ap.add_argument("--pr", help="open this GitHub PR number on load")
+    ap.add_argument("--commit", help="open this commit's diff on load")
+    ap.add_argument("--merge", help="open this merge commit on load")
+    ap.add_argument("--base", help="open this base..head on load (with --head)")
+    ap.add_argument("--head")
+    ap.add_argument("--no-open", action="store_true", help="don't open a browser window")
     args = ap.parse_args()
 
+    # auto-select the current git repo when no repo was given
+    repo = args.repo or git_toplevel(os.getcwd())
+
+    preload = {k: v for k, v in {"pr": args.pr, "commit": args.commit, "merge": args.merge,
+                                 "base": args.base, "head": args.head}.items() if v}
+
     cfg = {
-        "repo": _norm_repo(args.repo),
+        "repo": _norm_repo(repo),
         "invariants": _norm_repo(args.invariants),
         "token": os.environ.get("PRISM_TOKEN", ""),
         "allowed": [s.strip() for s in os.environ.get("PRISM_ALLOWED_REPOS", "").split(",") if s.strip()],
         "base_path": os.environ.get("PRISM_BASE_PATH", "").rstrip("/"),
+        "preload": preload,
     }
     srv = ThreadingHTTPServer((args.host, args.port), make_handler(cfg))
-    print(f"Prism  →  http://{args.host}:{args.port}{cfg['base_path'] or ''}")
-    print(f"  default repo: {cfg['repo'] or '(enter one in the UI)'}")
+    shown = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
+    url = f"http://{shown}:{args.port}{cfg['base_path'] or ''}/"
+    print(f"Prism  →  {url}")
+    print(f"  repo: {cfg['repo'] or '(enter one in the UI)'}" + ("  [auto-detected]" if not args.repo and cfg['repo'] else ""))
+    if preload:
+        print(f"  preloading: {preload}")
     if cfg["token"]:
         print("  access:       token required (?token=…)")
     elif args.host == "0.0.0.0":
-        print("  WARNING: bound publicly with no PRISM_TOKEN — anyone can trigger repo clones.")
+        print("  note: bound on 0.0.0.0 with no PRISM_TOKEN — fine locally, set a token if exposed.")
     if cfg["allowed"]:
         print(f"  allowlist:    {cfg['allowed']}")
+    if not args.no_open and not os.environ.get("PORT"):   # local run, not a hosted deploy
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception:
+            pass
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

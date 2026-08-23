@@ -25,6 +25,14 @@ def is_url(s):
     return s.startswith(("http://", "https://", "git@", "ssh://")) or s.endswith(".git")
 
 
+def git_toplevel(path="."):
+    """Return the root of the git repo containing `path`, or '' if not inside a repo."""
+    try:
+        return sh("git", "-C", path, "rev-parse", "--show-toplevel")
+    except Exception:
+        return ""
+
+
 def ensure_local(repo, update=True):
     """Accept a local path OR a git URL. URLs are cloned into a cache and reused; returns a
     local path either way — so every command that takes a `repo` also takes a GitHub link."""

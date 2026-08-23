@@ -1,20 +1,24 @@
 name: 'Prism Semantic Review'
-description: 'Runs Prism semantic diff to detect behavioral changes in a PR'
+description: 'Semantic diff of a PR — what changed, where to look, and whether it breaks your rules'
 branding:
   icon: 'shield'
   color: 'purple'
 inputs:
   github_token:
-    description: 'GitHub token to fetch PR data'
+    description: 'GitHub token (for PR data + posting the comment)'
     required: true
     default: ${{ github.token }}
   fail_on:
-    description: 'When to fail the build (violation, crit, or none)'
+    description: 'When to fail the build: violation, crit, or none'
     required: false
     default: 'none'
   invariants:
-    description: 'Path to invariants JSON file (optional)'
+    description: 'Path to a confirmed invariants JSON file (optional)'
     required: false
+  comment:
+    description: 'Post the review as a sticky PR comment (true/false)'
+    required: false
+    default: 'true'
 outputs:
   review_markdown:
     description: 'Path to the generated markdown review'
@@ -23,24 +27,31 @@ runs:
   using: 'composite'
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.10'
-        
+        python-version: '3.11'
+
     - name: Install Prism
       shell: bash
-      run: pip install prism-reviewer
-      
-    - name: Run Prism Review
+      run: pip install "prism-semantic-reviewer>=0.1.3"
+
+    - name: Run Prism review
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }}"
-        if [ "${{ inputs.invariants }}" != "" ]; then
-          CMD="$CMD --invariants ${{ inputs.invariants }}"
-        fi
-        if [ "${{ inputs.fail_on }}" != "none" ]; then
-          CMD="$CMD --fail-on ${{ inputs.fail_on }}"
-        fi
-        eval $CMD
+        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md"
+        if [ -n "${{ inputs.invariants }}" ]; then CMD="$CMD --invariants ${{ inputs.invariants }}"; fi
+        if [ "${{ inputs.fail_on }}" != "none" ]; then CMD="$CMD --fail-on ${{ inputs.fail_on }}"; fi
+        echo "$CMD"; eval "$CMD"
+
+    - name: Post sticky PR comment
+      if: ${{ always() && inputs.comment == 'true' && hashFiles('pr_review.md') != '' }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        python "${GITHUB_ACTION_PATH}/ci/post_review.py" \
+          "${{ github.event.pull_request.number }}" pr_review.md \
+          || echo "::warning::could not post comment — ensure the job has 'permissions: pull-requests: write'"

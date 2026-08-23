@@ -364,11 +364,11 @@ def list_merges(repo, n=30):
     return out
 
 
-def run_review(repo, base=None, head=None, merge=None, pr=None, invariants_path=None):
+def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, invariants_path=None):
     """Full review pipeline as a function (used by the CLI and the web service).
 
     `repo` may be a local path or a git URL (cloned/cached automatically). `pr` reviews a real
-    GitHub pull request by number.
+    GitHub pull request by number; `commit` reviews a single commit (its diff vs its parent).
     """
     url = repo
     repo = ensure_local(repo, update=not pr)
@@ -376,6 +376,9 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, invariants_path=
     if pr:
         base, head, title = resolve_github_pr(url, repo, pr)
         merge = None
+    elif commit:
+        base, head, merge = f"{commit}^", commit, None
+        title = sh("git", "-C", repo, "log", "-1", "--pretty=%s", commit) or f"commit {commit}"
     b, h, ttl = resolve_refs(repo, merge, base, head)
     title = title or ttl
     shortstat = sh("git", "-C", repo, "diff", "--shortstat", b, h)
@@ -412,6 +415,7 @@ def main():
     ap.add_argument("--base")
     ap.add_argument("--head")
     ap.add_argument("--pr", help="review a GitHub PR by number (needs a GitHub URL repo)")
+    ap.add_argument("--commit", help="review a single commit (its diff vs its parent)")
     ap.add_argument("--out", default="pr_review.md")
     ap.add_argument("--invariants", help="confirmed invariant corpus JSON to enforce")
     ap.add_argument("--json", dest="json_out", help="write structured review JSON")
@@ -421,7 +425,7 @@ def main():
     args = ap.parse_args()
 
     res = run_review(args.repo, base=args.base, head=args.head, merge=args.merge,
-                     pr=args.pr, invariants_path=args.invariants)
+                     pr=args.pr, commit=args.commit, invariants_path=args.invariants)
     review, report, findings, changes = res["review"], res["report"], res["findings"], res["changes"]
     open(args.out, "w").write(report)
     print(report)
