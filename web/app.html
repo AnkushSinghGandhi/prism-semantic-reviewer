@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Semantic Review — live</title>
+<title>Prism — Semantic PR Review</title>
 <style>
   :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--fg:#e6edf3;--mut:#8b949e;
     --crit:#f85149;--high:#db8f2b;--med:#d0b429;--low:#3fb950;--link:#58a6ff;--purple:#bc8cff;}
@@ -52,11 +52,33 @@
   .lg-ext::before{background:var(--crit)}.lg-async::before{background:var(--purple)}
   svg text{fill:var(--fg);font:12px ui-monospace,Menlo,monospace}
   svg .elabel{fill:var(--mut);font-size:10px}
+  /* branding */
+  .logo{font-weight:800;letter-spacing:.5px}
+  .logo .g{background:linear-gradient(90deg,var(--crit),var(--high),var(--low),var(--link),var(--purple));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  /* welcome / empty state */
+  #welcome{display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 175px);padding:24px}
+  #welcome .hero{max-width:640px;text-align:center}
+  #welcome .mark{font-size:64px;line-height:1;margin-bottom:14px;
+    background:linear-gradient(135deg,var(--crit),var(--high),var(--low),var(--link),var(--purple));
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  #welcome h2{font-size:24px;margin:0 0 10px}#welcome h2 em{font-style:normal;color:var(--link)}
+  #welcome p{color:var(--mut);font-size:14.5px;margin:0 auto 18px;max-width:520px}
+  #welcome .chips{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-bottom:16px}
+  #welcome .chips span{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:4px 11px;font-size:12.5px}
+  #welcome .sev{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
+  #welcome .sev b{color:var(--fg);font-weight:600}
+  body:not(.loaded) main{display:none}
+  body.loaded #welcome{display:none}
 </style>
 </head>
 <body>
 <header>
-  <h1>Semantic Review <span style="color:var(--mut);font-weight:400">— live</span></h1>
+  <h1 style="display:flex;align-items:baseline;gap:10px">
+    <span class="logo">◭ <span class="g">Prism</span></span>
+    <span style="color:var(--mut);font-weight:400;font-size:12.5px">semantic PR review</span>
+  </h1>
   <div class="bar" style="margin-bottom:8px">
     <input id="prurl" style="min-width:440px"
            placeholder="paste a GitHub PR link → https://github.com/owner/repo/pull/123">
@@ -77,6 +99,18 @@
   <div class="sub" id="status">Paste a GitHub PR link and hit Review PR — or browse a repo's PRs below.</div>
   <div class="tally" id="tally"></div>
 </header>
+<div id="welcome">
+  <div class="hero">
+    <div class="mark">◭</div>
+    <h2>See what a PR <em>means</em>, not just what changed</h2>
+    <p>Paste a GitHub PR link above and hit <b>Review PR</b> — or browse a repo's PRs, or drop in a
+      commit sha. Prism turns a huge diff into the few changes that matter, with the exact lines to look at.</p>
+    <div class="chips"><span>new endpoints</span><span>DB writes</span><span>external calls</span>
+      <span>PII egress</span><span>auth changes</span></div>
+    <div class="sev"><span>🔴 <b>security / data-flow</b></span><span>🟠 money</span>
+      <span>🟡 new write / dependency</span><span>🟢 refactor</span></div>
+  </div>
+</div>
 <div id="invwrap"></div>
 <main>
   <div id="list"><div class="filters" id="filters"></div><div id="items"></div></div>
@@ -167,6 +201,7 @@ async function review(){
 }
 
 function render(){
+  document.body.classList.add("loaded");   // swap the welcome screen for the results layout
   const counts={}; DATA.changes.forEach(c=>counts[c.sev]=(counts[c.sev]||0)+1);
   document.getElementById("tally").innerHTML=
     ["🔴","🟠","🟡","🟢"].filter(s=>counts[s]).map(s=>`<b>${s} ${counts[s]}</b>`).join("&nbsp;&nbsp;")
