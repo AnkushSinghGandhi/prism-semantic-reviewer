@@ -1,0 +1,699 @@
+{
+  "title": "Merge pull request #183 from careers-360/common_companion_jun",
+  "base": "37485e83",
+  "head": "1e8a628a",
+  "shortstat": "94 files changed, 17841 insertions(+), 35 deletions(-)",
+  "invariants": [
+    {
+      "kind": "NEW VIOLATION",
+      "sev": "🔴",
+      "stmt": "Authenticated access before any DB write",
+      "detail": "1 endpoint(s) introduced/changed by this PR break this invariant",
+      "rows": [
+        [
+          "api/v1/companions/payment/invoice",
+          "open (AllowAny)",
+          "cnext_backend/apps/payment/views/invoice_views.py:9"
+        ]
+      ],
+      "locs": [
+        "api/v1/companions/payment/invoice — open (AllowAny) @ cnext_backend/apps/payment/views/invoice_views.py:9"
+      ]
+    },
+    {
+      "kind": "NEW VIOLATION",
+      "sev": "🔴",
+      "stmt": "PII read + egress only on authenticated endpoints",
+      "detail": "1 endpoint(s) introduced/changed by this PR break this invariant",
+      "rows": [
+        [
+          "api/v1/companions/payment/invoice",
+          "open (AllowAny)",
+          "cnext_backend/apps/payment/views/invoice_views.py:9"
+        ]
+      ],
+      "locs": [
+        "api/v1/companions/payment/invoice — open (AllowAny) @ cnext_backend/apps/payment/views/invoice_views.py:9"
+      ]
+    },
+    {
+      "kind": "WEAKENING",
+      "sev": "🔴",
+      "stmt": "External/PII egress limited to approved destinations",
+      "detail": "egress allowlist would expand — new destination(s) not among the 0 approved: settings.PAYTM_STATUS_URL",
+      "locs": []
+    },
+    {
+      "kind": "STILL-VIOLATING",
+      "sev": "🟡",
+      "stmt": "Authenticated access before any DB write",
+      "detail": "3 pre-existing violation(s) (not this PR)",
+      "rows": [
+        [
+          "api/v1/payment/product-details",
+          "open (AllowAny)",
+          "cnext_backend/apps/college_predictor_payment/views/product_views.py:18"
+        ],
+        [
+          "api/<int:version>/upload-image",
+          "open (AllowAny)",
+          "cnext_backend/apps/tools/api/controllers.py:24"
+        ],
+        [
+          "college-predictor/report-pdf",
+          "open (AllowAny)",
+          "cnext_backend/apps/college_predictor/views.py:188"
+        ]
+      ],
+      "locs": []
+    },
+    {
+      "kind": "STILL-VIOLATING",
+      "sev": "🟡",
+      "stmt": "PII read + egress only on authenticated endpoints",
+      "detail": "2 pre-existing violation(s) (not this PR)",
+      "rows": [
+        [
+          "api/v1/payment/last-usage",
+          "open (AllowAny)",
+          "cnext_backend/apps/college_predictor_payment/views/usage_views.py:78"
+        ],
+        [
+          "college-predictor/report-pdf",
+          "open (AllowAny)",
+          "cnext_backend/apps/college_predictor/views.py:188"
+        ]
+      ],
+      "locs": []
+    }
+  ],
+  "changes": [
+    {
+      "sev": "🔴",
+      "kind": "NEW ENDPOINT",
+      "route": "api/v2/companions/payment/create-order",
+      "why": "new endpoint reads PII and has an egress path",
+      "detail": "auth: permission_classes=['IsAuthenticated']",
+      "auth": "permission_classes=['IsAuthenticated']",
+      "flow": "api/v2/companions/payment/create-order → CompanionCreateOrder → {<instance>:write, CPProductCampaign:read, CareersProductCouponCode:read, CareersProductCouponPack:read, Order:read, Order:write, OrderedItems:write, ProductEntities:read, UrlAlias:read, User:read} → ext: requests.post -> ?",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:56",
+          "fact": "handler CompanionCreateOrder (POST)"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:365",
+          "fact": "requests.post -> ? (via call)"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:135",
+          "fact": "reads User"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:91",
+          "fact": "Order:write"
+        },
+        {
+          "where": "cnext_backend/apps/payment/services/coupon_service.py:110",
+          "fact": "<instance>:write (via call)"
+        },
+        {
+          "where": "cnext_backend/apps/payment/models/orders.py:89",
+          "fact": "OrderedItems:write (via call)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: <instance>:write, CPProductCampaign:read, CareersProductCouponCode:read, CareersProductCouponPack:read, Order:read, Order:write, OrderedItems:write, ProductEntities:read, UrlAlias:read, User:read — write hidden in manager/service",
+        "external ⚠: requests.post -> ? — indirect; dest unresolved",
+        "async ⚠: threading.Thread -> send_payment_success_email — pattern-detected; not in a Celery-only view",
+        "pii ⚠: reads User — PII source co-occurs with an egress path — object-level taint not traced"
+      ]
+    },
+    {
+      "sev": "🔴",
+      "kind": "NEW ENDPOINT",
+      "route": "api/v1/companions/payment/order-status",
+      "why": "new endpoint reads PII and has an egress path",
+      "detail": "auth: permission_classes=['IsAuthenticated']",
+      "auth": "permission_classes=['IsAuthenticated']",
+      "flow": "api/v1/companions/payment/order-status → CompanionOrderStatus → {CPProductCampaign:read, Order:read, Order:write, OrderedItems:read, ProductEntities:read, User:read} → ext: requests.post -> settings.PAYTM_STATUS_URL",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:407",
+          "fact": "handler CompanionOrderStatus (GET)"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:611",
+          "fact": "requests.post -> settings.PAYTM_STATUS_URL (via call)"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:421",
+          "fact": "reads User"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:431",
+          "fact": "Order:write"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:541",
+          "fact": "Order:write (via call)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CPProductCampaign:read, Order:read, Order:write, OrderedItems:read, ProductEntities:read, User:read — write hidden in manager/service",
+        "external ⚠: requests.post -> settings.PAYTM_STATUS_URL — indirect; host in settings",
+        "async ⚠: threading.Thread -> send_payment_failed_email, threading.Thread -> send_payment_processing_email, threading.Thread -> send_payment_success_email — pattern-detected; not in a Celery-only view",
+        "pii ⚠: reads User — PII source co-occurs with an egress path — object-level taint not traced"
+      ]
+    },
+    {
+      "sev": "🔴",
+      "kind": "NEW ENDPOINT",
+      "route": "api/v1/companions/payment/invoice",
+      "why": "new endpoint exposes a PII path with open/unspecified auth",
+      "detail": "auth: open (AllowAny)",
+      "auth": "open (AllowAny)",
+      "flow": "api/v1/companions/payment/invoice → CompanionGetInvoice → {<instance>:write, CPProductCampaign:read, Location:read, Order:read, OrderedItems:read, User:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/payment/views/invoice_views.py:9",
+          "fact": "handler CompanionGetInvoice (GET)"
+        },
+        {
+          "where": "cnext_backend/apps/payment/services/invoice_service.py:273",
+          "fact": "email"
+        },
+        {
+          "where": "cnext_backend/apps/payment/services/invoice_service.py:190",
+          "fact": "reads User"
+        },
+        {
+          "where": "cnext_backend/apps/payment/services/invoice_service.py:218",
+          "fact": "<instance>:write (via call)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: <instance>:write, CPProductCampaign:read, Location:read, Order:read, OrderedItems:read, User:read — write hidden in manager/service",
+        "pii ?: email, reads User — PII source read; downstream egress not proven"
+      ]
+    },
+    {
+      "sev": "🟠",
+      "kind": "NEW ENDPOINT",
+      "route": "api/v1/companions/payment/product-details",
+      "why": "new endpoint on a money/payment path",
+      "detail": "auth: permission_classes=['IsAuthenticated']",
+      "auth": "permission_classes=['IsAuthenticated']",
+      "flow": "api/v1/companions/payment/product-details → CompanionProductDetails",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/payment/views/product_views.py:18",
+          "fact": "handler CompanionProductDetails (GET)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟠",
+      "kind": "NEW ENDPOINT",
+      "route": "api/v1/companions/payment/validate-coupon",
+      "why": "new endpoint on a money/payment path",
+      "detail": "auth: permission_classes=['IsAuthenticated']",
+      "auth": "permission_classes=['IsAuthenticated']",
+      "flow": "api/v1/companions/payment/validate-coupon → CompanionValidateCoupon → {CareersProductCouponPack:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/payment/views/product_views.py:44",
+          "fact": "handler CompanionValidateCoupon (POST)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CareersProductCouponPack:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟠",
+      "kind": "NEW ENDPOINT",
+      "route": "api/v1/companions/payment/callback/<int:order_id>",
+      "why": "new endpoint on a money/payment path",
+      "detail": "auth: open (AllowAny)",
+      "auth": "open (AllowAny)",
+      "flow": "api/v1/companions/payment/callback/<int:order_id> → CompanionPaymentCallback",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/payment/views/payment_views.py:379",
+          "fact": "handler CompanionPaymentCallback (POST,GET)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟠",
+      "kind": "NEW ENDPOINT",
+      "route": "api/v1/companions/order-shipping-address",
+      "why": "new endpoint on a money/payment path",
+      "detail": "auth: permission_classes=['IsAuthenticated']",
+      "auth": "permission_classes=['IsAuthenticated']",
+      "flow": "api/v1/companions/order-shipping-address → OrderShippingAddressAPIView → {<instance>:write, OrderShippingAddress:read, OrderShippingAddress:write}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/payment/views/address_views.py:47",
+          "fact": "handler OrderShippingAddressAPIView (GET,POST)"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/address_views.py:142",
+          "fact": "<instance>:write"
+        },
+        {
+          "where": "cnext_backend/apps/payment/views/address_views.py:149",
+          "fact": "OrderShippingAddress:write"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: <instance>:write, OrderShippingAddress:read, OrderShippingAddress:write — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟡",
+      "kind": "NEW ENDPOINT",
+      "route": "api/token/",
+      "why": "new endpoint — handler not resolved in repo (library/external view)",
+      "detail": "auth: unspecified",
+      "auth": "unspecified",
+      "flow": "api/token/ → TokenObtainPairView",
+      "investigate": [
+        {
+          "where": ":0",
+          "fact": "handler TokenObtainPairView (?)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟡",
+      "kind": "NEW ENDPOINT",
+      "route": "api/token/refresh/",
+      "why": "new endpoint — handler not resolved in repo (library/external view)",
+      "detail": "auth: unspecified",
+      "auth": "unspecified",
+      "flow": "api/token/refresh/ → TokenRefreshView",
+      "investigate": [
+        {
+          "where": ":0",
+          "fact": "handler TokenRefreshView (?)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟡",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/announcements/read",
+      "why": "new endpoint with a DB write / external call",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/announcements/read → MarkAnnouncementReadAPI → {Announcement:read, AnnouncementEntityMapping:read, UserAnnouncementRead:read, UserAnnouncementRead:write}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/announcements/controllers.py:426",
+          "fact": "handler MarkAnnouncementReadAPI (POST)"
+        },
+        {
+          "where": "cnext_backend/apps/companions/api/announcements/controllers.py:480",
+          "fact": "UserAnnouncementRead:write"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: Announcement:read, AnnouncementEntityMapping:read, UserAnnouncementRead:read, UserAnnouncementRead:write — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟡",
+      "kind": "CHANGED",
+      "route": "api/<int:version>/college-predictor/cutoff-index/rebuild",
+      "why": "new async dispatch: threading.Thread -> service.run_sync_compainion_cutoof_data",
+      "detail": "",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/college-predictor/cutoff-index/rebuild → CutoffIndexRebuildAPI",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/college_predictor/api/controllers.py:136",
+          "fact": "handler CutoffIndexRebuildAPI (POST)"
+        },
+        {
+          "where": "cnext_backend/apps/college_predictor/api/controllers.py:167",
+          "fact": "threading.Thread -> service.run_sync_compainion_cutoof_data"
+        }
+      ],
+      "unknowns": [
+        "async ⚠: threading.Thread -> service.run_sync_compainion_cutoof_data — pattern-detected; not in a Celery-only view"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/college-predictor/seat-allotment/tuples",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/college-predictor/seat-allotment/tuples → SeatAllotmentTuplesAPI → {CnextUserCourse:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/college_predictor/seat_allotment/apis/tuple_results_api.py:92",
+          "fact": "handler SeatAllotmentTuplesAPI (POST)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CnextUserCourse:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/college-predictor/seat-allotment/search",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/college-predictor/seat-allotment/search → SeatAllotmentSearchAPI → {CnextUserCourse:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/college_predictor/seat_allotment/apis/tuple_results_api.py:133",
+          "fact": "handler SeatAllotmentSearchAPI (POST)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CnextUserCourse:read, UrlAlias:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/college-predictor/seat-allotment/filter-options",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/college-predictor/seat-allotment/filter-options → SeatAllotmentFilterOptionsAPI → {CnextUserCourse:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/college_predictor/seat_allotment/apis/tuple_results_api.py:158",
+          "fact": "handler SeatAllotmentFilterOptionsAPI (POST)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CnextUserCourse:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/college-predictor/seat-allotment/dropdowns",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/college-predictor/seat-allotment/dropdowns → SeatAllotmentDropdownsAPI → {CnextUserCourse:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/college_predictor/seat_allotment/apis/tuple_results_api.py:212",
+          "fact": "handler SeatAllotmentDropdownsAPI (POST)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CnextUserCourse:read, UrlAlias:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/college-predictor/seat-allotment/college-seat-data",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/college-predictor/seat-allotment/college-seat-data → SeatAllotmentCollegeSeatAPI → {CPProductCampaign:read, CollegeCourse:read, Degrees:read, Exam:read, Location:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/college_predictor/seat_allotment/apis/college_seat_api.py:17",
+          "fact": "handler SeatAllotmentCollegeSeatAPI (GET)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CPProductCampaign:read, CollegeCourse:read, Degrees:read, Exam:read, Location:read, UrlAlias:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/college-predictor/seat-allotment/cache-flush",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/college-predictor/seat-allotment/cache-flush → SeatAllotmentCacheFlushAPI → {UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/college_predictor/seat_allotment/apis/tuple_results_api.py:272",
+          "fact": "handler SeatAllotmentCacheFlushAPI (POST)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/college-predictor/seat-allotment/cutoff-data-sync",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/college-predictor/seat-allotment/cutoff-data-sync → CutoffDataSyncAPI → {CPCutoffFinal:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/college_predictor/seat_allotment/apis/tuple_results_api.py:346",
+          "fact": "handler CutoffDataSyncAPI (POST)"
+        }
+      ],
+      "unknowns": [
+        "async ⚠: threading.Thread -> _run_sync — pattern-detected; not in a Celery-only view"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/announcements/dashboard",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/announcements/dashboard → AnnouncementDashboardAPI → {Announcement:read, AnnouncementEntityMapping:read, UserAnnouncementRead:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/announcements/controllers.py:21",
+          "fact": "handler AnnouncementDashboardAPI (GET)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: Announcement:read, AnnouncementEntityMapping:read, UserAnnouncementRead:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/announcements/list",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/announcements/list → AnnouncementListAPI → {Announcement:read, AnnouncementEntityMapping:read, UserAnnouncementRead:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/announcements/controllers.py:88",
+          "fact": "handler AnnouncementListAPI (GET)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: Announcement:read, AnnouncementEntityMapping:read, UserAnnouncementRead:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/announcements/filters",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/announcements/filters → AnnouncementFiltersAPI → {Announcement:read, AnnouncementEntityMapping:read, AnnouncementProduct:read, UserAnnouncementRead:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/announcements/controllers.py:294",
+          "fact": "handler AnnouncementFiltersAPI (GET)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/dashboard/summary",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/dashboard/summary → DashboardSummaryAPI → {Announcement:read, AnnouncementEntityMapping:read, AnnouncementProduct:read, UserAnnouncementRead:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/dashboard/controllers.py:48",
+          "fact": "handler DashboardSummaryAPI (GET)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: Announcement:read, AnnouncementEntityMapping:read, AnnouncementProduct:read, UserAnnouncementRead:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/dashboard/prediction-stats",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/dashboard/prediction-stats → DashboardPredictionStatsAPI → {CPProductCampaign:read, DashboardExamDates:read, Exam:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/dashboard/controllers.py:112",
+          "fact": "handler DashboardPredictionStatsAPI (GET)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CPProductCampaign:read, DashboardExamDates:read, Exam:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/companion_landing/home-page",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/companion_landing/home-page → CompanionHomePageAPI → {CPProductCampaign:read, LandingPageTestimonial:read, MetaTags:read, ToolsLandingPage:read, ToolsLandingPageFAQ:read, ToolsLandingPageSection:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/landing/controllers.py:19",
+          "fact": "handler CompanionHomePageAPI (GET)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/companion_landing/application-open-listing",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/companion_landing/application-open-listing → ApplicationOpenListingAPI → {CPCutoffFinal:read, CPProductCampaign:read, CollegeCourse:read, Exam:read, ExamApplication:read, ExamDates:read, ExamMode:read, PreferredEducationLevel:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/landing/controllers.py:361",
+          "fact": "handler ApplicationOpenListingAPI (GET)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/companion_landing/application-open-filters",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/companion_landing/application-open-filters → ApplicationOpenFiltersAPI → {CPCutoffFinal:read, CPProductCampaign:read, CollegeCourse:read, Exam:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/landing/controllers.py:1040",
+          "fact": "handler ApplicationOpenFiltersAPI (GET)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/companion_landing/application-open-search",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/companion_landing/application-open-search → ApplicationOpenSearchAPI → {CPCutoffFinal:read, CPProductCampaign:read, CollegeCourse:read, Exam:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/landing/controllers.py:1411",
+          "fact": "handler ApplicationOpenSearchAPI (GET)"
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/companion_landing/companion-purchase-check",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/companion_landing/companion-purchase-check → CompanionPurchaseCheckAPI → {CPProductCampaign:read, CampaignPage:read, Domain:read, Order:read, OrderedItems:read, ProductEntities:read, ProductSession:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/landing/controllers.py:2198",
+          "fact": "handler CompanionPurchaseCheckAPI (GET)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CPProductCampaign:read, CampaignPage:read, Domain:read, Order:read, OrderedItems:read, ProductEntities:read, ProductSession:read, UrlAlias:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/companion_landing/companion-recommended-tools-cp",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/companion_landing/companion-recommended-tools-cp → CompanionRecommendedToolsCP → {CPProductCampaign:read, CnextProductMapping:read, CpProductCampaignItems:read, Domain:read, Exam:read, ExamDates:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/landing/controllers.py:2423",
+          "fact": "handler CompanionRecommendedToolsCP (GET)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CPProductCampaign:read, CnextProductMapping:read, CpProductCampaignItems:read, Domain:read, Exam:read, ExamDates:read, UrlAlias:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/companion_landing/companion-recommended-tools-rp",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/companion_landing/companion-recommended-tools-rp → CompanionRecommendedToolsRP → {CPProductCampaign:read, Domain:read, Exam:read, ExamDates:read, PreferredEducationLevel:read, UrlAlias:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/landing/controllers.py:2619",
+          "fact": "handler CompanionRecommendedToolsRP (GET)"
+        }
+      ],
+      "unknowns": [
+        "db ⚠: CPProductCampaign:read, Domain:read, Exam:read, ExamDates:read, PreferredEducationLevel:read, UrlAlias:read — write hidden in manager/service"
+      ]
+    },
+    {
+      "sev": "🟢",
+      "kind": "NEW ENDPOINT",
+      "route": "api/<int:version>/companion_landing/registration-prefill",
+      "why": "new read-only endpoint",
+      "detail": "auth: permission_classes=['ApiKeyPermission']",
+      "auth": "permission_classes=['ApiKeyPermission']",
+      "flow": "api/<int:version>/companion_landing/registration-prefill → ToolRegistrationPrefillAPI → {ProductSession:read, ToolRegistrationFlowEntry:read, ToolsLandingPage:read}",
+      "investigate": [
+        {
+          "where": "cnext_backend/apps/companions/api/registration/controllers.py:33",
+          "fact": "handler ToolRegistrationPrefillAPI (GET)"
+        }
+      ],
+      "unknowns": []
+    }
+  ]
+}
