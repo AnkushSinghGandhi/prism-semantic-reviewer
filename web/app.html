@@ -69,9 +69,10 @@
     <select id="pr"><option value="">— pick a PR —</option></select>
     <button onclick="review()">Review</button>
     <span class="mono" style="color:var(--mut)">or</span>
-    <input id="prnum" style="min-width:90px" placeholder="PR #">
-    <input id="base" style="min-width:100px" placeholder="base sha">
-    <input id="head" style="min-width:100px" placeholder="head sha">
+    <input id="prnum" style="min-width:80px" placeholder="PR #">
+    <input id="commit" style="min-width:100px" placeholder="commit sha">
+    <input id="base" style="min-width:95px" placeholder="base sha">
+    <input id="head" style="min-width:95px" placeholder="head sha">
   </div>
   <div class="sub" id="status">Paste a GitHub PR link and hit Review PR — or browse a repo's PRs below.</div>
   <div class="tally" id="tally"></div>
@@ -93,7 +94,18 @@ const TOKEN=new URLSearchParams(location.search).get("token")||"";
 function apiURL(p,params){params=Object.assign({},params||{});if(TOKEN)params.token=TOKEN;
   const q=qs(params);return BASE+p+(q?"?"+q:"");}
 
-fetch(apiURL("api/config")).then(r=>r.json()).then(c=>{if(c.repo)document.getElementById("repo").value=c.repo;}).catch(()=>{});
+// on load: prefill the (auto-detected) repo and, if the server was started with a target
+// (prism serve --pr / --commit / --base --head), open that review straight away.
+fetch(apiURL("api/config")).then(r=>r.json()).then(c=>{
+  if(c.repo) document.getElementById("repo").value=c.repo;
+  const p=c.preload||{};
+  if(p.pr) document.getElementById("prnum").value=p.pr;
+  if(p.commit) document.getElementById("commit").value=p.commit;
+  if(p.base) document.getElementById("base").value=p.base;
+  if(p.head) document.getElementById("head").value=p.head;
+  if(p.merge) document.getElementById("pr").value="merge:"+p.merge;
+  if(p.pr||p.commit||p.merge||(p.base&&p.head)) review();
+}).catch(()=>{});
 
 function qs(o){return Object.entries(o).filter(([,v])=>v).map(([k,v])=>k+"="+encodeURIComponent(v)).join("&");}
 function status(s){document.getElementById("status").textContent=s;}
@@ -114,6 +126,7 @@ function openPRLink(){
   document.getElementById("repo").value="https://github.com/"+m[1]+"/"+m[2];
   document.getElementById("prnum").value=m[3];
   document.getElementById("pr").value="";
+  document.getElementById("commit").value="";
   document.getElementById("base").value=""; document.getElementById("head").value="";
   review();
 }
@@ -141,12 +154,13 @@ async function review(){
   const pickedPR=picked.startsWith("pr:")?picked.slice(3):"";
   const merge=(!pickedPR && picked)?(picked.startsWith("merge:")?picked.slice(6):picked):"";
   const pr=document.getElementById("prnum").value.trim()||pickedPR;
+  const commit=document.getElementById("commit").value.trim();
   const base=document.getElementById("base").value.trim();
   const head=document.getElementById("head").value.trim();
-  if(!repo||(!merge&&!pr&&!(base&&head))){status("Need a repo and (a PR, a GitHub PR #, or base+head).");return;}
-  status(pr?`Fetching GitHub PR #${pr} and analyzing… (may clone on first use)`:"Analyzing base & head snapshots… (a few seconds)");
+  if(!repo||(!merge&&!pr&&!commit&&!(base&&head))){status("Need a repo and (a PR, PR #, commit sha, or base+head).");return;}
+  status(pr?`Fetching GitHub PR #${pr} and analyzing…`:commit?`Reviewing commit ${commit}…`:"Analyzing snapshots… (a few seconds)");
   try{
-    const d=await getJSON(apiURL("api/review",{repo,merge,pr,base,head}));
+    const d=await getJSON(apiURL("api/review",{repo,merge,pr,commit,base,head}));
     DATA=d; sel=null; render();
     status(`${DATA.base} → ${DATA.head} · ${DATA.shortstat||""}`);
   }catch(e){status("Error: "+e);}
