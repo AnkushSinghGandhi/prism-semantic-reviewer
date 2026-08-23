@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """
-Live web service for Semantic Review — stdlib only, no dependencies.
+Prism live web service — stdlib only, no dependencies.
 
-    python3 serve.py [--repo <default-repo>] [--invariants <corpus.json>] [--port 8765]
+Local:
+    python3 serve.py [--repo <default-repo-or-url>] [--invariants <corpus.json>] [--port 8765]
 
-Then open http://127.0.0.1:8765 : pick a PR, get the ranked review + an interactive
-node-link graph of each change. Runs the analysis on demand and caches results.
+Deployed (e.g. Render) it reads these env vars:
+    PORT                 port to bind (Render sets this)                     [default 8765]
+    HOST                 interface to bind                                   [default 0.0.0.0]
+    PRISM_TOKEN          if set, /api/* requires ?token=... (lock down public deploys)
+    PRISM_ALLOWED_REPOS  comma-separated substrings; only matching repos may be reviewed
+    PRISM_BASE_PATH      serve under a sub-path, e.g. /prism (behind a reverse proxy)
+    GITHUB_TOKEN         for private repos / GitHub API rate limits
+    PRISM_DEFAULT_REPO   default repo shown in the UI
+    PRISM_INVARIANTS     default invariant corpus path
 """
 import argparse
 import json
@@ -16,13 +24,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import diff_pr  # noqa: E402
+import diff_pr           # noqa: E402
+from gitutil import is_url  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = {}   # (repo, merge, base, head, inv) -> review
+CACHE = {}   # (repo, merge, base, head, pr, inv) -> review
 
 
-def make_handler(defaults):
+def make_handler(cfg):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -38,24 +47,49 @@ def make_handler(defaults):
         def _json(self, code, obj):
             self._send(code, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8")
 
+        def _authorized(self, g):
+            if not cfg["token"]:
+                return True
+            return (g("token") or self.headers.get("X-Prism-Token")) == cfg["token"]
+
+        def _repo_ok(self, repo):
+            if not cfg["allowed"]:
+                return True
+            return any(a and a in repo for a in cfg["allowed"])
+
         def do_GET(self):
             u = urlparse(self.path)
             q = parse_qs(u.query)
             g = lambda k, d=None: (q.get(k) or [d])[0]  # noqa: E731
+            path = u.path
+            bp = cfg["base_path"]
+            if bp and path.startswith(bp):
+                path = path[len(bp):] or "/"
             try:
-                if u.path in ("/", "/index.html"):
+                if path in ("/", "/index.html", ""):
                     return self._send(200, open(os.path.join(HERE, "web", "app.html"), "rb").read(),
                                       "text/html; charset=utf-8")
-                if u.path == "/api/config":
-                    return self._json(200, {"repo": defaults["repo"], "invariants": defaults["invariants"]})
-                if u.path == "/api/prs":
-                    repo = g("repo") or defaults["repo"]
+                if path == "/healthz":
+                    return self._json(200, {"ok": True})
+
+                if path.startswith("/api/") and not self._authorized(g):
+                    return self._json(401, {"error": "unauthorized — append ?token=…"})
+
+                if path == "/api/config":
+                    return self._json(200, {"repo": cfg["repo"], "invariants": cfg["invariants"],
+                                            "locked": bool(cfg["allowed"])})
+                if path == "/api/prs":
+                    repo = g("repo") or cfg["repo"]
                     if not repo:
                         return self._json(400, {"error": "no repo given"})
+                    if not self._repo_ok(repo):
+                        return self._json(403, {"error": "repo not in allowlist"})
                     return self._json(200, {"repo": repo, "prs": diff_pr.list_merges(repo, int(g("n", "30")))})
-                if u.path == "/api/review":
-                    repo = g("repo") or defaults["repo"]
-                    inv = g("invariants") or defaults["invariants"] or None
+                if path == "/api/review":
+                    repo = g("repo") or cfg["repo"]
+                    if not self._repo_ok(repo):
+                        return self._json(403, {"error": "repo not in allowlist"})
+                    inv = g("invariants") or cfg["invariants"] or None
                     key = (repo, g("merge"), g("base"), g("head"), g("pr"), inv)
                     if key not in CACHE:
                         res = diff_pr.run_review(repo, base=g("base"), head=g("head"),
@@ -69,20 +103,34 @@ def make_handler(defaults):
     return Handler
 
 
+def _norm_repo(r):
+    return r if (not r or is_url(r)) else os.path.abspath(r)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repo", default="")
-    ap.add_argument("--invariants", default="")
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--repo", default=os.environ.get("PRISM_DEFAULT_REPO", ""))
+    ap.add_argument("--invariants", default=os.environ.get("PRISM_INVARIANTS", ""))
+    ap.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
     args = ap.parse_args()
-    defaults = {"repo": os.path.abspath(args.repo) if args.repo else "",
-                "invariants": os.path.abspath(args.invariants) if args.invariants else ""}
-    srv = ThreadingHTTPServer((args.host, args.port), make_handler(defaults))
-    print(f"Semantic Review  →  http://{args.host}:{args.port}")
-    print(f"  default repo: {defaults['repo'] or '(enter one in the UI)'}")
-    if defaults["invariants"]:
-        print(f"  enforcing:    {defaults['invariants']}")
+
+    cfg = {
+        "repo": _norm_repo(args.repo),
+        "invariants": _norm_repo(args.invariants),
+        "token": os.environ.get("PRISM_TOKEN", ""),
+        "allowed": [s.strip() for s in os.environ.get("PRISM_ALLOWED_REPOS", "").split(",") if s.strip()],
+        "base_path": os.environ.get("PRISM_BASE_PATH", "").rstrip("/"),
+    }
+    srv = ThreadingHTTPServer((args.host, args.port), make_handler(cfg))
+    print(f"Prism  →  http://{args.host}:{args.port}{cfg['base_path'] or ''}")
+    print(f"  default repo: {cfg['repo'] or '(enter one in the UI)'}")
+    if cfg["token"]:
+        print("  access:       token required (?token=…)")
+    elif args.host == "0.0.0.0":
+        print("  WARNING: bound publicly with no PRISM_TOKEN — anyone can trigger repo clones.")
+    if cfg["allowed"]:
+        print(f"  allowlist:    {cfg['allowed']}")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

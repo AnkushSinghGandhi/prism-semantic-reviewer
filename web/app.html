@@ -81,7 +81,13 @@ const COL={crit:"var(--crit)",high:"var(--high)",med:"var(--med)",low:"var(--low
 const active=new Set(["🔴","🟠","🟡","🟢"]);
 let DATA=null, sel=null, tab="graph";
 
-fetch("/api/config").then(r=>r.json()).then(c=>{if(c.repo)document.getElementById("repo").value=c.repo;});
+// path-relative base so it works at "/" or under a sub-path like "/prism"; token from URL
+const BASE=location.pathname.endsWith("/")?location.pathname:location.pathname+"/";
+const TOKEN=new URLSearchParams(location.search).get("token")||"";
+function apiURL(p,params){params=Object.assign({},params||{});if(TOKEN)params.token=TOKEN;
+  const q=qs(params);return BASE+p+(q?"?"+q:"");}
+
+fetch(apiURL("api/config")).then(r=>r.json()).then(c=>{if(c.repo)document.getElementById("repo").value=c.repo;}).catch(()=>{});
 
 function qs(o){return Object.entries(o).filter(([,v])=>v).map(([k,v])=>k+"="+encodeURIComponent(v)).join("&");}
 function status(s){document.getElementById("status").textContent=s;}
@@ -91,7 +97,7 @@ async function loadPRs(){
   if(!repo){status("Enter a repo path first.");return;}
   status("Loading PRs…");
   try{
-    const d=await (await fetch("/api/prs?"+qs({repo}))).json();
+    const d=await (await fetch(apiURL("api/prs",{repo}))).json();
     if(d.error){status("Error: "+d.error);return;}
     const sel=document.getElementById("pr");
     sel.innerHTML='<option value="">— pick a merged PR —</option>'+
@@ -109,7 +115,7 @@ async function review(){
   if(!repo||(!merge&&!pr&&!(base&&head))){status("Need a repo and (a PR, a GitHub PR #, or base+head).");return;}
   status(pr?`Fetching GitHub PR #${pr} and analyzing… (may clone on first use)`:"Analyzing base & head snapshots… (a few seconds)");
   try{
-    const d=await (await fetch("/api/review?"+qs({repo,merge,pr,base,head}))).json();
+    const d=await (await fetch(apiURL("api/review",{repo,merge,pr,base,head}))).json();
     if(d.error){status("Error: "+d.error);return;}
     DATA=d; sel=null; render();
     status(`${DATA.base} → ${DATA.head} · ${DATA.shortstat||""}`);
