@@ -303,14 +303,17 @@ def resolve_refs(repo, merge=None, base=None, head=None):
 
 
 def list_merges(repo, n=30):
-    """Recent merge PRs for the picker: [{sha, title, shortstat}]. Accepts a local path or URL."""
+    """Recent merge PRs for the picker: [{sha, title}]. Accepts a local path or URL.
+
+    Deliberately does NOT compute per-PR shortstat (that was N extra git calls and made the
+    picker slow/hang on big repos) — the real line diff is shown once a PR is reviewed.
+    """
     repo = ensure_local(repo)
     out = []
     for line in sh("git", "-C", repo, "log", "--merges", "--pretty=%h\t%s", f"-{n}").splitlines():
         sha, _, title = line.partition("\t")
         if "pull request" in title or "Merge" in title:
-            stat = sh("git", "-C", repo, "diff", "--shortstat", f"{sha}^1", f"{sha}^2")
-            out.append({"sha": sha, "title": title, "shortstat": stat})
+            out.append({"sha": sha, "title": title})
     return out
 
 
