@@ -5,6 +5,9 @@ import subprocess
 
 CACHE_ROOT = os.environ.get("PRISM_CACHE", os.path.expanduser("~/.cache/prism/repos"))
 
+# Never let git block forever on a credential prompt (private repo w/o token) — fail fast.
+os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")
+
 
 def sh(*args):
     return subprocess.run(args, capture_output=True, text=True).stdout.strip()

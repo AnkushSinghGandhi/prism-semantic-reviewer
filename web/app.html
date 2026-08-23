@@ -57,17 +57,23 @@
 <body>
 <header>
   <h1>Semantic Review <span style="color:var(--mut);font-weight:400">— live</span></h1>
+  <div class="bar" style="margin-bottom:8px">
+    <input id="prurl" style="min-width:440px"
+           placeholder="paste a GitHub PR link → https://github.com/owner/repo/pull/123">
+    <button onclick="openPRLink()"><b>Review PR</b></button>
+  </div>
   <div class="bar">
+    <span class="mono" style="color:var(--mut)">or browse:</span>
     <input id="repo" placeholder="/path/to/repo  or  https://github.com/owner/repo">
     <button onclick="loadPRs()">Load PRs</button>
     <select id="pr"><option value="">— pick a merged PR —</option></select>
     <button onclick="review()">Review</button>
     <span class="mono" style="color:var(--mut)">or</span>
-    <input id="prnum" style="min-width:90px" placeholder="GitHub PR #">
-    <input id="base" style="min-width:110px" placeholder="base sha">
-    <input id="head" style="min-width:110px" placeholder="head sha">
+    <input id="prnum" style="min-width:90px" placeholder="PR #">
+    <input id="base" style="min-width:100px" placeholder="base sha">
+    <input id="head" style="min-width:100px" placeholder="head sha">
   </div>
-  <div class="sub" id="status">Enter a local path or a GitHub URL, then load its PRs.</div>
+  <div class="sub" id="status">Paste a GitHub PR link and hit Review PR — or browse a repo's PRs below.</div>
   <div class="tally" id="tally"></div>
 </header>
 <div id="invwrap"></div>
@@ -92,13 +98,32 @@ fetch(apiURL("api/config")).then(r=>r.json()).then(c=>{if(c.repo)document.getEle
 function qs(o){return Object.entries(o).filter(([,v])=>v).map(([k,v])=>k+"="+encodeURIComponent(v)).join("&");}
 function status(s){document.getElementById("status").textContent=s;}
 
+// robust: never blow up on a non-JSON response (proxy/Render 404 etc.) — surface it clearly
+async function getJSON(url){
+  const r=await fetch(url);
+  const t=await r.text();
+  let d; try{d=JSON.parse(t);}catch(_){throw new Error(`HTTP ${r.status}: ${t.slice(0,140)}`);}
+  if(!r.ok||d.error) throw new Error(d.error||`HTTP ${r.status}`);
+  return d;
+}
+
+function openPRLink(){
+  const m=document.getElementById("prurl").value.trim()
+    .match(/github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/);
+  if(!m){status("Paste a full PR link like https://github.com/owner/repo/pull/123");return;}
+  document.getElementById("repo").value="https://github.com/"+m[1]+"/"+m[2];
+  document.getElementById("prnum").value=m[3];
+  document.getElementById("pr").value="";
+  document.getElementById("base").value=""; document.getElementById("head").value="";
+  review();
+}
+
 async function loadPRs(){
   const repo=document.getElementById("repo").value.trim();
   if(!repo){status("Enter a repo path first.");return;}
   status("Loading PRs…");
   try{
-    const d=await (await fetch(apiURL("api/prs",{repo}))).json();
-    if(d.error){status("Error: "+d.error);return;}
+    const d=await getJSON(apiURL("api/prs",{repo}));
     const sel=document.getElementById("pr");
     sel.innerHTML='<option value="">— pick a merged PR —</option>'+
       d.prs.map(p=>`<option value="${p.sha}">${esc(p.title)} · ${esc(p.shortstat||"")}</option>`).join("");
@@ -115,8 +140,7 @@ async function review(){
   if(!repo||(!merge&&!pr&&!(base&&head))){status("Need a repo and (a PR, a GitHub PR #, or base+head).");return;}
   status(pr?`Fetching GitHub PR #${pr} and analyzing… (may clone on first use)`:"Analyzing base & head snapshots… (a few seconds)");
   try{
-    const d=await (await fetch(apiURL("api/review",{repo,merge,pr,base,head}))).json();
-    if(d.error){status("Error: "+d.error);return;}
+    const d=await getJSON(apiURL("api/review",{repo,merge,pr,base,head}));
     DATA=d; sel=null; render();
     status(`${DATA.base} → ${DATA.head} · ${DATA.shortstat||""}`);
   }catch(e){status("Error: "+e);}
