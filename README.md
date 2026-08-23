@@ -132,7 +132,7 @@ python3 run.py /path/to/django-repo
 You get a per-edge coverage table (how much it could resolve) and a `facts.json` you can feed to
 anything else. Good for a first look and for measuring how well it "sees" your code.
 
-### 2. Review a pull request (the main use)
+### 2. Review a pull request, branch, or commit (the main use)
 
 The repo can be a **local path or a GitHub URL** — a URL is cloned into a cache (`~/.cache/prism`)
 and reused on later runs, so you don't have to clone anything by hand.
@@ -143,10 +143,14 @@ By merge commit:
 python3 diff_pr.py /path/to/repo --merge <merge-commit-sha>
 ```
 
-By two refs (this is what CI uses):
+By two refs (branches or specific commits):
 
 ```bash
-python3 diff_pr.py /path/to/repo --base <base-sha> --head <head-sha>
+# Compare a local branch to master
+python3 diff_pr.py /path/to/repo --base master --head feature-branch
+
+# Compare two specific commit hashes
+python3 diff_pr.py /path/to/repo --base 9cca6d24 --head 34e8237b
 ```
 
 Straight from GitHub — by URL, and even by real PR number:
@@ -169,10 +173,12 @@ Add outputs:
 
 ```bash
 python3 diff_pr.py /path/to/repo --merge <sha> \
-    --out review.md \        # Markdown (for a PR comment)
+    --out review.md \        # Markdown (designed specifically to be posted as a comment in CI/CD)
     --json review.json \     # structured data (for any other UI)
     --html review.html       # a self-contained clickable report — just open it in a browser
 ```
+
+*Note on Markdown files: Prism generates an `.md` report by default. This is specifically meant to be used by GitHub Actions (or other CI/CD tools) to automatically post a formatted semantic review as a sticky comment directly in the GitHub PR interface. If you are reviewing code locally, you should use the Web UI instead.*
 
 ### 3. Open the interactive report
 

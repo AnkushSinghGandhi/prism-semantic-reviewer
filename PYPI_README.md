@@ -12,21 +12,26 @@ pip install prism-semantic-reviewer
 
 ## Quick Start
 
-### 1. Review a Pull Request
+### 1. Review a Pull Request, Branch, or Commit
 
-Run a semantic review on a local repository or directly via a GitHub URL:
+Run a semantic review on a local repository or directly via a GitHub URL. You can compare specific branches, commits, or just point it at a PR number:
 
 ```bash
-# Review a local PR by branch
+# Compare a local branch against master
 prism review /path/to/repo --base master --head feature-branch
+
+# Compare two specific commits
+prism review /path/to/repo --base 9cca6d24 --head 34e8237b
 
 # Review a GitHub PR directly
 prism review https://github.com/owner/repo --pr 123
 ```
 
+*Note: The CLI outputs a Markdown (`.md`) file by default. This is specifically designed for **GitHub Actions** so that Prism can automatically post the semantic review as a formatted comment directly in your GitHub Pull Request UI.*
+
 ### 2. Start the Interactive Web UI
 
-Prism includes a built-in web server with an interactive node-link graph visualization of your PRs.
+If you are reviewing code locally, you can skip the markdown and use the built-in web server. It provides an interactive node-link graph visualization of your code changes.
 
 ```bash
 prism serve --port 8765
