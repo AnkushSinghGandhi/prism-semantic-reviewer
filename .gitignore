@@ -27,3 +27,9 @@ htmlcov/
 *.swo
 *~
 .DS_Store
+
+# Packaging
+dist/
+build/
+*.egg-info/
+
