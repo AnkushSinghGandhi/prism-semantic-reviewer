@@ -61,6 +61,24 @@
   .logo{font-weight:800;letter-spacing:.5px}
   .logo .g{background:linear-gradient(90deg,var(--crit),var(--high),var(--low),var(--link),var(--purple));
     -webkit-background-clip:text;background-clip:text;color:transparent}
+  /* right-corner branding — hidden on the welcome screen, shown once a review is loaded */
+  .brand-corner{display:none;margin-left:auto;align-self:center;align-items:center;gap:9px;
+    font-size:12px;color:var(--mut);font-weight:400}
+  .brand-corner a{text-decoration:none}
+  .brand-corner .who{color:var(--link);font-weight:600}
+  .brand-corner .who:hover{text-decoration:underline}
+  .brand-corner .mini{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:14px;
+    border:1px solid var(--line);background:var(--panel);color:var(--fg);font-weight:600;
+    transition:border-color .15s,color .15s,transform .15s}
+  .brand-corner .mini:hover{transform:translateY(-1px)}
+  .brand-corner .mini.star:hover{border-color:var(--med);color:var(--med)}
+  .brand-corner .mini.sponsor:hover{border-color:#db61a2;color:#db61a2}
+  .brand-corner .bwave{display:inline-block;transform-origin:70% 70%;animation:wave 2.2s ease-in-out infinite}
+  body.loaded .brand-corner{display:flex}
+  /* compact labels + compare controls */
+  .bar .lbl{color:var(--mut);min-width:62px;display:inline-block}
+  .bar .arrow{color:var(--mut)}
+  select.ref{min-width:210px;max-width:300px}
   /* welcome / empty state */
   #welcome{display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 175px);padding:24px}
   #welcome .hero{max-width:640px;text-align:center}
@@ -88,43 +106,59 @@
     animation:wave 2.2s ease-in-out infinite}
   @keyframes wave{0%,60%,100%{transform:rotate(0)}10%{transform:rotate(14deg)}
     20%{transform:rotate(-8deg)}30%{transform:rotate(14deg)}40%{transform:rotate(-4deg)}50%{transform:rotate(10deg)}}
-  @media (prefers-reduced-motion:reduce){#welcome .byline .wave{animation:none}}
+  @media (prefers-reduced-motion:reduce){#welcome .byline .wave,.brand-corner .bwave{animation:none}}
   body:not(.loaded) main{display:none}
   body.loaded #welcome{display:none}
 </style>
 </head>
 <body>
 <header>
-  <h1 style="display:flex;align-items:baseline;gap:10px">
+  <h1 style="display:flex;align-items:center;gap:10px">
     <span class="logo">◭ <span class="g">Prism</span></span>
     <span style="color:var(--mut);font-weight:400;font-size:12.5px">semantic PR review</span>
+    <div class="brand-corner">
+      <span class="bwave">👋</span> by
+      <a class="who" href="https://warriorwhocodes.com" target="_blank" rel="noopener">Ankush Singh Gandhi</a>
+      <a class="mini star" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer" target="_blank" rel="noopener">★ Star</a>
+      <a class="mini sponsor" href="https://github.com/sponsors/AnkushSinghGandhi" target="_blank" rel="noopener">♥ Sponsor</a>
+    </div>
   </h1>
-  <div class="bar" style="margin-bottom:8px">
-    <input id="prurl" style="min-width:440px"
-           placeholder="paste a GitHub PR link → https://github.com/owner/repo/pull/123">
-    <button onclick="openPRLink()"><b>Review PR</b></button>
+  <div class="bar">
+    <span class="lbl mono">repo</span>
+    <input id="repo" style="min-width:440px" placeholder="/path/to/local/repo">
+    <button onclick="loadRepo()"><b>Load</b></button>
   </div>
   <div class="bar">
-    <span class="mono" style="color:var(--mut)">or browse:</span>
-    <input id="repo" placeholder="/path/to/repo  or  https://github.com/owner/repo">
-    <button onclick="loadPRs()">Load PRs</button>
-    <select id="pr"><option value="">— pick a PR —</option></select>
-    <button onclick="review()">Review</button>
-    <span class="mono" style="color:var(--mut)">or</span>
-    <input id="prnum" style="min-width:80px" placeholder="PR #">
-    <input id="commit" style="min-width:100px" placeholder="commit sha">
-    <input id="base" style="min-width:95px" placeholder="base sha">
-    <input id="head" style="min-width:95px" placeholder="head sha">
+    <span class="lbl mono">PR</span>
+    <select id="pr"><option value="">— pick a merged PR —</option></select>
+    <button onclick="reviewPR()">Review</button>
   </div>
-  <div class="sub" id="status">Paste a GitHub PR link and hit Review PR — or browse a repo's PRs below.</div>
+  <div class="bar">
+    <span class="lbl mono">branches</span>
+    <select id="baseBranch" class="ref"><option value="">— base branch —</option></select>
+    <span class="arrow">→</span>
+    <select id="headBranch" class="ref"><option value="">— compare branch —</option></select>
+    <button onclick="compareBranches()">Compare</button>
+  </div>
+  <div class="bar">
+    <span class="lbl mono">commits</span>
+    <select id="baseCommit" class="ref"><option value="">— base commit —</option></select>
+    <span class="arrow">→</span>
+    <select id="headCommit" class="ref"><option value="">— compare commit —</option></select>
+    <button onclick="compareCommits()">Compare</button>
+  </div>
+  <!-- hidden refs: canonical review state, also settable via `serve --commit/--base/--head/--pr` -->
+  <input type="hidden" id="prnum"><input type="hidden" id="commit">
+  <input type="hidden" id="base"><input type="hidden" id="head">
+  <div class="sub" id="status">Enter a local repo path and hit Load — then pick a PR, or compare two branches or two commits.</div>
   <div class="tally" id="tally"></div>
 </header>
 <div id="welcome">
   <div class="hero">
     <div class="mark">◭</div>
     <h2>See what a PR <em>means</em>, not just what changed</h2>
-    <p>Paste a GitHub PR link above and hit <b>Review PR</b> — or browse a repo's PRs, or drop in a
-      commit sha. Prism turns a huge diff into the few changes that matter, with the exact lines to look at.</p>
+    <p>Point Prism at a <b>local repo</b>, then pick a merged PR — or compare two branches or two
+      commits. It turns a huge diff into the few changes that matter, with the exact lines to look at.</p>
     <div class="chips"><span>new endpoints</span><span>DB writes</span><span>external calls</span>
       <span>PII egress</span><span>auth changes</span></div>
     <div class="sev"><span>🔴 <b>security / data-flow</b></span><span>🟠 money</span>
@@ -164,6 +198,7 @@ fetch(apiURL("api/config")).then(r=>r.json()).then(c=>{
   if(p.head) document.getElementById("head").value=p.head;
   if(p.merge) document.getElementById("pr").value="merge:"+p.merge;
   if(p.pr||p.commit||p.merge||(p.base&&p.head)) review();
+  else if(c.repo) loadRepo();   // no preload: fill the PR / branch / commit pickers for this repo
 }).catch(()=>{});
 
 function qs(o){return Object.entries(o).filter(([,v])=>v).map(([k,v])=>k+"="+encodeURIComponent(v)).join("&");}
@@ -178,33 +213,64 @@ async function getJSON(url){
   return d;
 }
 
-function openPRLink(){
-  const m=document.getElementById("prurl").value.trim()
-    .match(/github\.com\/([^\/\s]+)\/([^\/\s]+)\/pull\/(\d+)/);
-  if(!m){status("Paste a full PR link like https://github.com/owner/repo/pull/123");return;}
-  document.getElementById("repo").value="https://github.com/"+m[1]+"/"+m[2];
-  document.getElementById("prnum").value=m[3];
-  document.getElementById("pr").value="";
-  document.getElementById("commit").value="";
-  document.getElementById("base").value=""; document.getElementById("head").value="";
-  review();
+function val(id){return document.getElementById(id).value;}
+function setVal(id,v){document.getElementById(id).value=v;}
+
+// Load everything the pickers need from one local repo: merged PRs, branches, recent commits.
+async function loadRepo(){
+  const repo=val("repo").trim();
+  if(!repo){status("Enter a local repo path first.");return;}
+  status("Loading repo…");
+  try{
+    const [prs,refs]=await Promise.all([
+      getJSON(apiURL("api/prs",{repo})).catch(()=>({prs:[]})),  // a repo may simply have no merges
+      getJSON(apiURL("api/refs",{repo})),
+    ]);
+    fillPRs(prs.prs||[]);
+    fillRefs(refs.branches||[], refs.commits||[]);
+    status(`Loaded ${(prs.prs||[]).length} PRs · ${(refs.branches||[]).length} branches · `+
+           `${(refs.commits||[]).length} commits. Pick a PR, or compare branches/commits.`);
+  }catch(e){status("Error: "+e);}
 }
 
-async function loadPRs(){
-  const repo=document.getElementById("repo").value.trim();
-  if(!repo){status("Enter a repo path first.");return;}
-  status("Loading PRs…");
-  try{
-    const d=await getJSON(apiURL("api/prs",{repo}));
-    const sel=document.getElementById("pr");
-    sel.innerHTML='<option value="">— pick a PR —</option>'+
-      d.prs.map(p=>{
-        const val=p.number?`pr:${p.number}`:`merge:${p.sha}`;
-        const meta=p.sha?` · ${p.sha}`:"";
-        return `<option value="${esc(val)}">${esc(p.title)}${esc(meta)}</option>`;
-      }).join("");
-    status(`Loaded ${d.prs.length} PRs. Pick one and hit Review (or use base/head).`);
-  }catch(e){status("Error: "+e);}
+function fillPRs(prs){
+  const el=document.getElementById("pr");
+  el.innerHTML='<option value="">— pick a merged PR —</option>'+prs.map(p=>{
+    const v=p.number?`pr:${p.number}`:`merge:${p.sha}`;
+    const meta=p.sha?` · ${p.sha}`:"";
+    return `<option value="${esc(v)}">${esc(p.title)}${esc(meta)}</option>`;}).join("");
+}
+
+function fillRefs(branches, commits){
+  const bopt=branches.map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join("");
+  document.getElementById("baseBranch").innerHTML='<option value="">— base branch —</option>'+bopt;
+  document.getElementById("headBranch").innerHTML='<option value="">— compare branch —</option>'+bopt;
+  const copt=commits.map(c=>`<option value="${esc(c.sha)}">${esc(c.sha)} · ${esc(clip(c.title,52))}</option>`).join("");
+  document.getElementById("baseCommit").innerHTML='<option value="">— base commit —</option>'+copt;
+  document.getElementById("headCommit").innerHTML='<option value="">— compare commit —</option>'+copt;
+  // handy default: newest commit compared against the one before it
+  if(commits[1]) setVal("baseCommit", commits[1].sha);
+  if(commits[0]) setVal("headCommit", commits[0].sha);
+}
+
+// blank every entry point but the one being used, so the backend gets an unambiguous request
+function clearRefs(){["prnum","commit","base","head"].forEach(id=>setVal(id,""));}
+
+function reviewPR(){
+  if(!val("pr")){status("Pick a PR from the list first.");return;}
+  clearRefs(); review();
+}
+function compareBranches(){
+  const b=val("baseBranch"), h=val("headBranch");
+  if(!b||!h){status("Pick a base and a compare branch.");return;}
+  if(b===h){status("Pick two different branches.");return;}
+  setVal("pr",""); clearRefs(); setVal("base",b); setVal("head",h); review();
+}
+function compareCommits(){
+  const b=val("baseCommit"), h=val("headCommit");
+  if(!b||!h){status("Pick a base and a compare commit.");return;}
+  if(b===h){status("Pick two different commits.");return;}
+  setVal("pr",""); clearRefs(); setVal("base",b); setVal("head",h); review();
 }
 
 async function review(){
