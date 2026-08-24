@@ -397,6 +397,34 @@ def list_merges(repo, n=30):
     return out
 
 
+def list_branches(repo):
+    """Branch names for the compare picker, newest-first. Local branches first, then any
+    remote-tracking branch whose short name isn't already a local branch."""
+    repo = ensure_local(repo)
+    local = [b.strip() for b in sh("git", "-C", repo, "for-each-ref", "--sort=-committerdate",
+                                   "--format=%(refname:short)", "refs/heads").splitlines() if b.strip()]
+    remotes = []
+    for b in sh("git", "-C", repo, "for-each-ref", "--sort=-committerdate",
+                "--format=%(refname:short)", "refs/remotes").splitlines():
+        b = b.strip()
+        if not b or b.endswith("/HEAD"):
+            continue
+        short = b.split("/", 1)[1] if "/" in b else b
+        if short not in local:
+            remotes.append(b)
+    return local + remotes
+
+
+def list_commits(repo, n=50):
+    """Recent commits for the compare picker: [{sha, title}], newest-first."""
+    repo = ensure_local(repo)
+    out = []
+    for line in sh("git", "-C", repo, "log", "--pretty=%h\t%s", f"-{n}").splitlines():
+        sha, _, title = line.partition("\t")
+        out.append({"sha": sha, "title": title})
+    return out
+
+
 def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, invariants_path=None):
     """Full review pipeline as a function (used by the CLI and the web service).
 

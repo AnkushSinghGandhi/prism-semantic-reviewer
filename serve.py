@@ -87,6 +87,15 @@ def make_handler(cfg):
                     if not self._repo_ok(repo):
                         return self._json(403, {"error": "repo not in allowlist"})
                     return self._json(200, {"repo": repo, "prs": diff_pr.list_merges(repo, int(g("n", "30")))})
+                if path == "/api/refs":
+                    repo = g("repo") or cfg["repo"]
+                    if not repo:
+                        return self._json(400, {"error": "no repo given"})
+                    if not self._repo_ok(repo):
+                        return self._json(403, {"error": "repo not in allowlist"})
+                    return self._json(200, {"repo": repo,
+                                            "branches": diff_pr.list_branches(repo),
+                                            "commits": diff_pr.list_commits(repo, int(g("n", "50")))})
                 if path == "/api/review":
                     repo = g("repo") or cfg["repo"]
                     if not self._repo_ok(repo):
