@@ -230,6 +230,7 @@ class FactCollector(ast.NodeVisitor):
         self.self_calls = []   # method names called as self.x(...)
         self.func_calls = []   # bare names called x(...)
         self.typed_calls = []  # (ClassName, method) called as Model.method(...)
+        self.var_types = {}    # local var name -> Model (so `order.save()` → Order:write)
 
     def _loc(self, node):
         return (self.file, getattr(node, "lineno", 0))
@@ -242,9 +243,10 @@ class FactCollector(ast.NodeVisitor):
         if model and method:
             kind = "write" if method in ORM_WRITE else ("read" if method in ORM_READ else "read")
             self.db.append((model, kind, fl, ln))
-        # instance .save()/.delete()
+        # instance .save()/.delete() — resolve `var.save()` to its model when we know the type
         if isinstance(f, ast.Attribute) and f.attr in {"save", "delete"} and not model:
-            self.db.append(("<instance>", "write", fl, ln))
+            who = self.var_types.get(f.value.id) if isinstance(f.value, ast.Name) else None
+            self.db.append((who or "<instance>", "write", fl, ln))
         # external calls
         if isinstance(f, ast.Attribute):
             root = _root_name(f.value)
@@ -281,6 +283,30 @@ class FactCollector(ast.NodeVisitor):
         if node.attr in SENSITIVE:
             self.pii.append((node.attr, self.file, getattr(node, "lineno", 0)))
         self.generic_visit(node)
+
+    def visit_Assign(self, node: ast.Assign):
+        # remember `x = <something that reveals a Model>` so a later `x.save()` names the table
+        if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            model = self._model_of(node.value)
+            if model:
+                self.var_types[node.targets[0].id] = model
+        self.generic_visit(node)
+
+    @staticmethod
+    def _model_of(value):
+        if not isinstance(value, ast.Call):
+            return None
+        f = value.func
+        if isinstance(f, ast.Name) and f.id[:1].isupper():          # Model(...)
+            return f.id
+        m, _ = _orm_model_method(f)                                 # Model.objects.<method>(...)
+        if m:
+            return m
+        if isinstance(f, ast.Name) and f.id in {"get_object_or_404", "get_list_or_404"} \
+                and value.args and isinstance(value.args[0], ast.Name) \
+                and value.args[0].id[:1].isupper():                 # get_object_or_404(Model, …)
+            return value.args[0].id
+        return None
 
 
 def _orm_model_method(f):
@@ -430,35 +456,47 @@ def analyze_handler(name: str, index: RepoIndex) -> Endpoint:
     return ep
 
 
+MAX_FOLLOW_DEPTH = 2   # handler(0) → helper(1) → helper's helper(2). Capped: deeper loses precision.
+
+
 def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth):
+    """Collect facts in `fn`; recurse up to MAX_FOLLOW_DEPTH into the functions it calls.
+
+    Facts in the handler itself (depth 0) are direct; anything reached through a call (depth ≥ 1)
+    is tagged "(via call)" so the report stays honest about indirection.
+    """
     owner_rel = _rel(index, owner_file)
     local = FactCollector(owner_rel)
     local.visit(fn)
-    # merge (direct facts, keep their locations)
-    agg.db += local.db
-    agg.external += local.external
-    agg.async_ += local.async_
-    agg.pii += local.pii
-    if depth >= 1:
+    if depth == 0:
+        agg.db += local.db
+        agg.external += local.external
+        agg.async_ += local.async_
+        agg.pii += local.pii
+    else:
+        _tag_indirect(agg, local)      # reached via a call → mark it
+    if depth >= MAX_FOLLOW_DEPTH:
         return
-    # follow self.method(...) within same class (same file)
+
+    # self.method(...) — resolve against the current class's own methods
     for mname in set(local.self_calls):
-        if mname in classmethods and mname not in followed:
-            followed.add(mname)
-            sub = FactCollector(owner_rel)
-            sub.visit(classmethods[mname])
-            _tag_indirect(agg, sub)
-    # follow module-level func calls defined in the repo
+        key = f"self:{owner_rel}:{mname}"
+        if mname in classmethods and key not in followed:
+            followed.add(key)
+            _walk_follow(classmethods[mname], agg, index, owner_file, classmethods, followed, depth + 1)
+
+    # module-level func(...) defined in the repo
     for fname in set(local.func_calls):
-        if fname in followed:
+        key = f"func:{fname}"
+        if key in followed:
             continue
         node, ffile = index.find_func(fname, near=owner_file)
         if node is not None:
-            followed.add(fname)
-            sub = FactCollector(_rel(index, ffile))
-            sub.visit(node)
-            _tag_indirect(agg, sub)
-    # follow Model.classmethod(...) / Service().method(...) into the class body
+            followed.add(key)
+            _walk_follow(node, agg, index, ffile, {}, followed, depth + 1)
+
+    # Model.classmethod(...) / Service().method(...) — recurse with THAT class's methods,
+    # so a `self.x()` inside the service resolves correctly at the next level down
     for cname, mname in set(local.typed_calls):
         key = f"{cname}.{mname}"
         if key in followed:
@@ -466,13 +504,12 @@ def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth):
         cls, cfile = index.find_class(cname, near=owner_file)
         if cls is None:
             continue
-        for m in cls.body:
-            if isinstance(m, ast.FunctionDef) and m.name == mname:
-                followed.add(key)
-                sub = FactCollector(_rel(index, cfile))
-                sub.visit(m)
-                _tag_indirect(agg, sub)
-                break
+        method = next((m for m in cls.body if isinstance(m, ast.FunctionDef) and m.name == mname), None)
+        if method is None:
+            continue
+        followed.add(key)
+        cls_methods = {m.name: m for m in cls.body if isinstance(m, ast.FunctionDef)}
+        _walk_follow(method, agg, index, cfile, cls_methods, followed, depth + 1)
 
 
 def _tag_indirect(agg, sub):
