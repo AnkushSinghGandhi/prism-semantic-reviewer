@@ -158,11 +158,11 @@ def diff(base_eps, head_eps):
                 sub.append((MED, f"new async dispatch: {', '.join(sorted(new))}"))
         if sub:
             sev = min((s for s, _ in sub), key=lambda x: [CRIT, HIGH, MED, LOW].index(x))
-            changes.append(dict(sev=sev, kind="CHANGED", route=route, ep=h,
+            changes.append(dict(sev=sev, kind="CHANGED", route=route, ep=h, base_ep=b,
                                 why="; ".join(t for _, t in sub), detail="", locs=locs,
                                 sub=[t for _, t in sub]))
         elif b.handler != h.handler:
-            changes.append(dict(sev=LOW, kind="REFACTOR", route=route, ep=h,
+            changes.append(dict(sev=LOW, kind="REFACTOR", route=route, ep=h, base_ep=b,
                                 why=f"handler renamed {b.handler} → {h.handler}, semantics unchanged",
                                 detail="(refactor-stable: no semantic diff)"))
 
@@ -245,6 +245,33 @@ def build_graph(ep):
     return {"nodes": nodes, "edges": edges}
 
 
+def _state_all(g, state):
+    for n in g["nodes"]:
+        n["state"] = state
+    for e in g["edges"]:
+        e["state"] = state
+    return g
+
+
+def build_diff_graph(base_ep, head_ep):
+    """Before/after graph: each node/edge tagged added / removed / same."""
+    base = build_graph(base_ep) if base_ep else {"nodes": [], "edges": []}
+    head = build_graph(head_ep) if head_ep else {"nodes": [], "edges": []}
+    bn = {n["id"] for n in base["nodes"]}
+    hn = {n["id"] for n in head["nodes"]}
+
+    def ek(e):
+        return (e["from"], e["to"], e["kind"].replace(" (via)", "").strip())
+    be = {ek(e) for e in base["edges"]}
+    he = {ek(e) for e in head["edges"]}
+
+    nodes = [dict(n, state="added" if n["id"] not in bn else "same") for n in head["nodes"]]
+    nodes += [dict(n, state="removed") for n in base["nodes"] if n["id"] not in hn]
+    edges = [dict(e, state="added" if ek(e) not in be else "same") for e in head["edges"]]
+    edges += [dict(e, state="removed") for e in base["edges"] if ek(e) not in he]
+    return {"nodes": nodes, "edges": edges}
+
+
 def build_review(changes, findings, meta):
     """Structured review for the JSON / HTML / web outputs."""
     def cd(c):
@@ -254,9 +281,15 @@ def build_review(changes, findings, meta):
         for loc in _dedupe(c.get("locs") or []):
             fact, _, where = loc.partition(" @ ")
             investigate.append({"where": where, "fact": fact})
+        if c["kind"] == "REMOVED ENDPOINT":
+            graph = _state_all(build_graph(ep), "removed")
+        elif c.get("base_ep") is not None:
+            graph = build_diff_graph(c["base_ep"], ep)     # CHANGED / REFACTOR → before vs after
+        else:
+            graph = _state_all(build_graph(ep), "added")   # NEW ENDPOINT → all new
         return {"sev": c["sev"], "kind": c["kind"], "route": c["route"], "why": c["why"],
                 "detail": c.get("detail", ""), "auth": auth_str(ep), "flow": flow(ep),
-                "investigate": investigate, "unknowns": unknowns(ep), "graph": build_graph(ep)}
+                "investigate": investigate, "unknowns": unknowns(ep), "graph": graph}
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
             "shortstat": meta["shortstat"], "invariants": findings or [],
             "changes": [cd(c) for c in changes]}

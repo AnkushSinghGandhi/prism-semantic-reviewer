@@ -51,7 +51,12 @@
   .lg-handler::before{background:var(--link)}.lg-read::before{background:#6e7681}.lg-write::before{background:var(--high)}
   .lg-ext::before{background:var(--crit)}.lg-async::before{background:var(--purple)}
   svg text{fill:var(--fg);font:12px ui-monospace,Menlo,monospace}
-  svg .elabel{fill:var(--mut);font-size:10px}
+  svg .elabel{fill:#adbac7;font-size:10.5px}
+  .gtools{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-4px 0 8px;flex-wrap:wrap}
+  .zoom{display:flex;align-items:center;gap:4px}
+  .zoom button{width:26px;height:24px;padding:0;font-size:15px;line-height:1;
+    display:flex;align-items:center;justify-content:center}
+  .zpct{font-size:11px;color:var(--mut);min-width:36px;text-align:center;user-select:none}
   /* branding */
   .logo{font-weight:800;letter-spacing:.5px}
   .logo .g{background:linear-gradient(90deg,var(--crit),var(--high),var(--low),var(--link),var(--purple));
@@ -69,6 +74,21 @@
     padding:4px 11px;font-size:12.5px}
   #welcome .sev{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;font-size:12.5px;color:var(--mut)}
   #welcome .sev b{color:var(--fg);font-weight:600}
+  #welcome .byline{margin-top:22px;font-size:12.5px;color:var(--mut)}
+  #welcome .byline a{color:var(--link);text-decoration:none;font-weight:600}
+  #welcome .byline a:hover{text-decoration:underline}
+  #welcome .links{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+  #welcome .links .gh{display:inline-flex;align-items:center;gap:6px;padding:6px 13px;border-radius:16px;
+    border:1px solid var(--line);background:var(--panel);color:var(--fg);font-size:12.5px;
+    font-weight:600;text-decoration:none;transition:border-color .15s,transform .15s}
+  #welcome .links .gh:hover{transform:translateY(-1px)}
+  #welcome .links .star:hover{border-color:var(--med);color:var(--med)}
+  #welcome .links .sponsor:hover{border-color:#db61a2;color:#db61a2}
+  #welcome .byline .wave{display:inline-block;transform-origin:70% 70%;
+    animation:wave 2.2s ease-in-out infinite}
+  @keyframes wave{0%,60%,100%{transform:rotate(0)}10%{transform:rotate(14deg)}
+    20%{transform:rotate(-8deg)}30%{transform:rotate(14deg)}40%{transform:rotate(-4deg)}50%{transform:rotate(10deg)}}
+  @media (prefers-reduced-motion:reduce){#welcome .byline .wave{animation:none}}
   body:not(.loaded) main{display:none}
   body.loaded #welcome{display:none}
 </style>
@@ -109,6 +129,11 @@
       <span>PII egress</span><span>auth changes</span></div>
     <div class="sev"><span>🔴 <b>security / data-flow</b></span><span>🟠 money</span>
       <span>🟡 new write / dependency</span><span>🟢 refactor</span></div>
+    <div class="byline"><span class="wave">👋</span> by <a href="https://warriorwhocodes.com" target="_blank" rel="noopener">Ankush Singh Gandhi</a> · warriorwhocodes.com</div>
+    <div class="links">
+      <a class="gh star" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer" target="_blank" rel="noopener">★ Star on GitHub</a>
+      <a class="gh sponsor" href="https://github.com/sponsors/AnkushSinghGandhi" target="_blank" rel="noopener">♥ Sponsor me</a>
+    </div>
   </div>
 </div>
 <div id="invwrap"></div>
@@ -120,7 +145,7 @@
 const SEV={"🔴":"crit","🟠":"high","🟡":"med","🟢":"low"};
 const COL={crit:"var(--crit)",high:"var(--high)",med:"var(--med)",low:"var(--low)"};
 const active=new Set(["🔴","🟠","🟡","🟢"]);
-let DATA=null, sel=null, tab="graph";
+let DATA=null, sel=null, tab="graph", graphZoom=1;
 
 // path-relative base so it works at "/" or under a sub-path like "/prism"; token from URL
 const BASE=location.pathname.endsWith("/")?location.pathname:location.pathname+"/";
@@ -241,6 +266,7 @@ function renderDetail(c){
 }
 function setTab(t){tab=t;document.getElementById("tg").className=t==='graph'?'on':'';
   document.getElementById("tw").className=t==='where'?'on':'';renderTab(DATA.changes[sel]);}
+function zoomGraph(f){graphZoom=Math.min(3,Math.max(0.4,graphZoom*f));renderTab(DATA.changes[sel]);}
 
 function renderTab(c){
   const b=document.getElementById("tabbody");
@@ -251,6 +277,13 @@ function renderTab(c){
   }else{
     b.innerHTML=`<div class="legend"><span class="lg-handler">handler</span><span class="lg-read">table read</span>`+
       `<span class="lg-write">table write</span><span class="lg-ext">external</span><span class="lg-async">async</span></div>`+
+      `<div class="gtools"><span style="font-size:11.5px;color:var(--mut)">before → after: `+
+      `<span style="color:var(--low);font-weight:700">+ new</span> · `+
+      `<span style="color:var(--crit);font-weight:700">− removed</span> · `+
+      `<span style="opacity:.5">unchanged (dimmed)</span></span>`+
+      `<span class="zoom"><button onclick="zoomGraph(1/1.2)" title="Zoom out">−</button>`+
+      `<span class="zpct">${Math.round(graphZoom*100)}%</span>`+
+      `<button onclick="zoomGraph(1.2)" title="Zoom in">+</button></span></div>`+
       drawGraph(c.graph);
   }
 }
@@ -260,27 +293,40 @@ function drawGraph(g){
   const byType=t=>g.nodes.filter(n=>n.type===t);
   const route=byType("route"), handler=byType("handler");
   const leaves=g.nodes.filter(n=>!["route","handler"].includes(n.type));
-  const rowH=42, top=20, colR=20, colH=250, colL=520, boxH=26;
-  const H=Math.max(handler.length*rowH, leaves.length*rowH)+top*2+10;
+  const rowH=44, top=24, colR=16, boxH=26, LABELGAP=130;
+  const w=(lbl)=>Math.min(260,Math.max(90,clip(lbl,34).length*7.2+22));  // wider boxes
+  const maxW=list=>list.reduce((m,n)=>Math.max(m,w(n.label)),90);
+  // columns are spaced by content, with a fixed gap so the route→handler method
+  // label always has room between the two boxes
+  const colH=colR+maxW(route)+LABELGAP;
+  const colL=colH+maxW(handler)+90;
+  const rows=Math.max(route.length, handler.length, leaves.length, 1);
+  const H=rows*rowH+top*2;
   const yMid=H/2;
   const pos={};
-  route.forEach(n=>pos[n.id]=[colR,yMid]);
-  handler.forEach(n=>pos[n.id]=[colH,yMid]);
-  leaves.forEach((n,i)=>pos[n.id]=[colL,top+boxH/2+i*rowH]);
-  const w=(lbl)=>Math.min(230,Math.max(70,lbl.length*7.2+18));
+  // center each column vertically; if a column has several nodes (e.g. a renamed
+  // handler = old+new), stack them so their boxes never overlap
+  const place=(list,x)=>{const s=yMid-(list.length-1)*rowH/2; list.forEach((n,i)=>pos[n.id]=[x,s+i*rowH]);};
+  place(route,colR); place(handler,colH); place(leaves,colL);
   function nodeSvg(n){
     const [x,y]=pos[n.id], ww=w(n.label);
-    let stroke="#6e7681", fill="var(--panel)";
+    let stroke="#6e7681";
     if(n.type==="handler")stroke="var(--link)";
     else if(n.type==="external")stroke="var(--crit)";
     else if(n.type==="async")stroke="var(--purple)";
     else if(n.type==="table")stroke=(n.kind||"").includes("write")?"var(--high)":"#6e7681";
     else if(n.type==="route")stroke="#8b949e";
+    const st=n.state||"same";
+    const op=st==="same"?0.45:(st==="removed"?0.62:1);        // new pops, unchanged dims (still legible)
+    const sw=st==="added"?2.4:1.6;
+    const dash=st==="removed"?'stroke-dasharray="4 3"':"";
+    const mark=st==="added"?`<text x="${x-11}" y="${y+4}" fill="var(--low)" font-weight="700">+</text>`
+             :st==="removed"?`<text x="${x-11}" y="${y+4}" fill="var(--crit)" font-weight="700">−</text>`:"";
     const pii=n.pii?`<circle cx="${x+ww-8}" cy="${y-boxH/2+2}" r="5" fill="var(--crit)"><title>PII source</title></circle>`:"";
-    const sub=n.type==="handler"&&n.auth?`<title>${esc(n.auth)}</title>`:(n.loc?`<title>${esc(n.loc)}</title>`:"");
-    return `<g>${sub}<rect x="${x}" y="${y-boxH/2}" width="${ww}" height="${boxH}" rx="6" `+
-      `fill="${fill}" stroke="${stroke}" stroke-width="1.6"/>`+
-      `<text x="${x+9}" y="${y+4}">${esc(clip(n.label,26))}</text>${pii}</g>`;
+    const tip=[n.label, n.type==="handler"&&n.auth?n.auth:"", n.loc||""].filter(Boolean).join("  ·  ");
+    return `<g opacity="${op}"><title>${esc(tip)}</title>${mark}<rect x="${x}" y="${y-boxH/2}" width="${ww}" height="${boxH}" rx="6" `+
+      `fill="var(--panel)" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`+
+      `<text x="${x+9}" y="${y+4}">${esc(clip(n.label,34))}</text>${pii}</g>`;
   }
   function edgeSvg(e){
     const s=pos[e.from], t=pos[e.to]; if(!s||!t)return"";
@@ -288,11 +334,20 @@ function drawGraph(g){
     const mx=(x1+x2)/2;
     const col=e.kind&&e.kind.includes("write")?"var(--high)":
       e.kind==="calls"?"var(--crit)":e.kind==="dispatches"?"var(--purple)":"#6e7681";
-    return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${col}" stroke-width="1.4" opacity=".8"/>`+
-      `<text class="elabel" x="${mx}" y="${(y1+y2)/2-3}" text-anchor="middle">${esc(e.kind||"")}</text>`;
+    const st=e.state||"same";
+    const lineOp=st==="same"?0.3:(st==="removed"?0.55:0.95);
+    const labelOp=st==="same"?0.7:(st==="removed"?0.75:1);
+    const sw=st==="added"?1.9:1.3;
+    const dash=st==="removed"?'stroke-dasharray="5 4"':"";
+    // horizontal edges (route → handler): centre the label above the connector.
+    // fanning edges (handler → leaf): put it just before the target, on that row — no pile-up.
+    const horiz=Math.abs(y1-y2)<8;
+    const lx=horiz?(x1+x2)/2:x2-8, ly=horiz?y1-9:y2-6, anchor=horiz?"middle":"end";
+    return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${col}" stroke-width="${sw}" opacity="${lineOp}" ${dash}/>`+
+      `<text class="elabel" x="${lx}" y="${ly}" text-anchor="${anchor}" opacity="${labelOp}">${esc(e.kind||"")}</text>`;
   }
-  const width=colL+240;
-  return `<svg width="100%" viewBox="0 0 ${width} ${H}" style="max-width:${width}px">`+
+  const width=colL+maxW(leaves)+24;
+  return `<svg width="100%" viewBox="0 0 ${width} ${H}" style="width:${Math.round(100*graphZoom)}%;max-width:${Math.round(width*graphZoom)}px">`+
     g.edges.map(edgeSvg).join("")+g.nodes.map(nodeSvg).join("")+`</svg>`;
 }
 
