@@ -69,7 +69,8 @@ refactors don't create noise.
 prism review <repo> --pr 481 \
     --out review.md \        # Markdown (used by CI to post a sticky PR comment)
     --json review.json \     # structured data (for any other UI)
-    --html review.html       # a self-contained clickable report — open it in a browser
+    --html review.html \     # a self-contained clickable report — open it in a browser
+    --sarif review.sarif     # GitHub code scanning — findings on the changed line + Security tab
 ```
 
 **Enforce your rules & gate CI:**
@@ -85,7 +86,7 @@ With `--invariants`, the review *opens* with a 🛡 panel that separates violati
 external destination) as its own event.
 
 Flags: `--pr` · `--commit` · `--merge` · `--base/--head` · `--out` · `--json` · `--html` ·
-`--invariants` · `--fail-on {violation,crit}`.
+`--sarif` · `--invariants` · `--fail-on {violation,crit}`.
 Set `GITHUB_TOKEN` for private repos / to avoid GitHub API rate limits.
 
 ### `prism serve` — the web UI

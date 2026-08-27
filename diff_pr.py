@@ -27,6 +27,24 @@ CRIT, HIGH, MED, LOW = "🔴", "🟠", "🟡", "🟢"
 EDGES = [("e3_db_tables", "db"), ("e4_external", "external"),
          ("e5_async", "async"), ("e6_pii", "pii")]
 
+INFO_URI = "https://github.com/AnkushSinghGandhi/prism"
+# GitHub code-scanning alert level per Prism severity tier.
+SARIF_LEVEL = {CRIT: "error", HIGH: "error", MED: "warning", LOW: "note"}
+# Optional numeric on each result for the Security-tab Critical/High/Medium/Low sort.
+SARIF_SECURITY = {CRIT: "9.0", HIGH: "7.0", MED: "4.0", LOW: "2.0"}
+
+
+def _prism_version():
+    try:
+        from importlib.metadata import version, PackageNotFoundError
+        try:
+            return version("prism-semantic-reviewer")
+        except PackageNotFoundError:
+            pass
+    except Exception:
+        pass
+    return "0"
+
 
 def norm(s):
     """Fact identity: strip inter-procedural marker and source location."""
@@ -329,6 +347,110 @@ def build_review(changes, findings, meta, changed=None):
             "changed_lines": changed or {}, "changes": [cd(c) for c in changes]}
 
 
+def _split_where(where):
+    """'path/file.py:123' -> ('path/file.py', 123). ('path', None) if no numeric line;
+    (None, None) if empty. Mirrors ci/post_review._split_loc but tolerates a bare path."""
+    if not where:
+        return None, None
+    path, sep, line = where.rpartition(":")
+    if sep and line.isdigit():
+        return path, int(line)
+    return where, None
+
+
+def _best_location(change, changed):
+    """(path, line, in_diff) for a change — the single line a SARIF result points at.
+
+    Prefers a *fact* location that lands on a changed line (a write/external/PII line the PR
+    actually touched), then the first fact location, then the handler definition. Every change
+    carries the handler loc, so this always resolves. `in_diff` records whether that line is in
+    the PR diff — SARIF only renders inline annotations for changed lines (honest guard); the
+    rest still surface as Security-tab alerts."""
+    locs = []
+    for i, it in enumerate(change.get("investigate", [])):
+        p, ln = _split_where(it.get("where", ""))
+        if p and ln is not None:
+            locs.append((i, p, ln))            # index 0 is the handler def; >=1 is a fact
+    if not locs:
+        return None, None, False
+    facts = [l for l in locs if l[0] >= 1]
+    for i, p, ln in facts:                      # a fact line inside the diff wins
+        if ln in changed.get(p, ()):
+            return p, ln, True
+    _, p, ln = (facts or locs)[0]
+    return p, ln, ln in changed.get(p, ())
+
+
+def build_sarif(review):
+    """Serialize a structured review into SARIF 2.1.0 for GitHub code scanning.
+
+    Pure re-shaping of facts we already computed: each semantic change and each PR-introduced
+    invariant finding becomes a `result` anchored at its `file:line`. `result.level` carries the
+    severity (error/warning/note); a `security-severity` property drives the Security-tab sort.
+    No new analysis — this is the Security-tab / Files-changed surface for the same findings."""
+    changed = {p: set(v) for p, v in (review.get("changed_lines") or {}).items()}
+    rules, seen, results = [], set(), []
+
+    def rule(rid, desc):
+        if rid not in seen:
+            seen.add(rid)
+            rules.append({"id": rid, "name": rid.split("/")[-1],
+                          "shortDescription": {"text": desc},
+                          "properties": {"tags": ["prism"]}})
+
+    def emit(rid, sev, text, path, line, in_diff, fp):
+        loc = []
+        if path:
+            phys = {"artifactLocation": {"uri": path}}
+            if line is not None:
+                phys["region"] = {"startLine": line}
+            loc = [{"physicalLocation": phys}]
+        results.append({
+            "ruleId": rid, "level": SARIF_LEVEL.get(sev, "warning"),
+            "message": {"text": text}, "locations": loc,
+            "partialFingerprints": {"prism/v1": fp},
+            "properties": {"prism-severity": sev, "in-diff": in_diff,
+                           "security-severity": SARIF_SECURITY.get(sev, "4.0")},
+        })
+
+    for c in review.get("changes", []):
+        rid = "prism/" + c["kind"].lower().replace(" ", "-")
+        rule(rid, f"Prism semantic change: {c['kind']}")
+        path, line, in_diff = _best_location(c, changed)
+        text = f"{c['kind']} {c['route']} — {c.get('why', '')}".strip()
+        emit(rid, c.get("sev", MED), text, path, line, in_diff, f"{c['kind']}::{c['route']}")
+
+    for f in review.get("invariants", []):
+        if f["kind"] not in ("NEW VIOLATION", "WEAKENING", "STILL-VIOLATING", "STILL-OUT"):
+            continue                            # only real alerts; HELD/RESOLVED aren't findings
+        rid = "prism/invariant/" + f["kind"].lower().replace(" ", "-")
+        rule(rid, f"Prism invariant alert: {f['kind']}")
+        sev, stmt = f.get("sev", MED), f.get("stmt", "")
+        located = []
+        for loc in f.get("locs", []):
+            fact, _, where = loc.partition(" @ ")
+            p, ln = _split_where(where)
+            if p and ln is not None:
+                located.append((fact, p, ln))
+        if located:
+            for fact, p, ln in located:
+                emit(rid, sev, f"{stmt} — {fact}", p, ln, ln in changed.get(p, ()),
+                     f"{f['kind']}::{stmt}::{p}:{ln}")
+        else:                                   # e.g. WEAKENING has no single line — attribute to root
+            emit(rid, sev, f"{stmt} — {f.get('detail', '')}", None, None, False,
+                 f"{f['kind']}::{stmt}")
+
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "Prism", "informationUri": INFO_URI,
+                                "version": _prism_version(), "rules": rules}},
+            "results": results,
+        }],
+    }
+
+
 def _gh_owner_repo(url):
     """owner/repo from https://github.com/owner/repo(.git) or git@github.com:owner/repo.git"""
     u = url.rstrip("/")
@@ -516,6 +638,7 @@ def main():
     ap.add_argument("--invariants", help="confirmed invariant corpus JSON to enforce")
     ap.add_argument("--json", dest="json_out", help="write structured review JSON")
     ap.add_argument("--html", help="write a self-contained HTML viewer")
+    ap.add_argument("--sarif", help="write SARIF 2.1.0 for GitHub code scanning")
     ap.add_argument("--fail-on", choices=["violation", "crit"], default=None,
                     help="exit non-zero on 🔴 invariant violations (violation) or any 🔴 (crit)")
     args = ap.parse_args()
@@ -530,7 +653,9 @@ def main():
         json.dump(review, open(args.json_out, "w"), ensure_ascii=False, indent=2)
     if args.html:
         write_html(review, args.html)
-    outs = ", ".join(x for x in [args.out, args.json_out, args.html] if x)
+    if args.sarif:
+        json.dump(build_sarif(review), open(args.sarif, "w"), ensure_ascii=False, indent=2)
+    outs = ", ".join(x for x in [args.out, args.json_out, args.html, args.sarif] if x)
     print(f"\n[analyzed {res['n_base']}→{res['n_head']} endpoints; wrote {outs}]")
 
     # Task 2 — gate CI

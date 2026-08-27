@@ -2,7 +2,7 @@
 analyzed 'head' endpoints — that exercises the real diff() code path without a second fixture."""
 from conftest import BLOG
 from extractor import analyze_repo
-from diff_pr import diff, parse_changed_lines
+from diff_pr import diff, parse_changed_lines, build_review, build_sarif
 
 
 def test_new_unauth_write_endpoint_is_critical():
@@ -61,3 +61,49 @@ def test_changed_lines_skips_deleted_files():
                  "-a = 1\n"
                  "-b = 2\n")
     assert parse_changed_lines(diff_text) == {}   # a deleted file has no anchorable head lines
+
+
+def _blog_review():
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]      # open-write is "new"
+    changes = diff(base, head)
+    meta = dict(title="t", base="b", head="h", shortstat="", inv_section="")
+    return build_review(changes, [], meta, changed={})
+
+
+def test_sarif_is_valid_2_1_0_and_maps_severity():
+    review = _blog_review()
+    s = build_sarif(review)
+    assert s["version"] == "2.1.0" and s["runs"][0]["tool"]["driver"]["name"] == "Prism"
+    results = s["runs"][0]["results"]
+    assert results, "every semantic change should produce a SARIF result"
+    # each result carries a valid code-scanning level and a location
+    assert all(r["level"] in ("error", "warning", "note") for r in results)
+    assert all(r["locations"] and "artifactLocation" in r["locations"][0]["physicalLocation"]
+               for r in results)
+    # the new unauthenticated write (🔴) maps to error
+    crit = [r for r in results if "open-write" in r["message"]["text"]]
+    assert crit and crit[0]["level"] == "error"
+
+
+def test_sarif_in_diff_flag_tracks_changed_lines():
+    """A finding whose line the PR changed is marked in-diff (annotates the Files-changed view);
+    one outside the diff is not (Security-tab only) — the honest guard, computed, not guessed."""
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]
+    changes = diff(base, head)
+    meta = dict(title="t", base="b", head="h", shortstat="", inv_section="")
+
+    # with an empty diff, nothing anchors inline (all Security-tab only)
+    off = build_sarif(build_review(changes, [], meta, changed={}))
+    assert all(r["properties"]["in-diff"] is False for r in off["runs"][0]["results"])
+
+    # mark every investigate line of the top change as changed → its result becomes in-diff
+    top = build_review(changes, [], meta, changed={})["changes"][0]
+    changed = {}
+    for it in top["investigate"]:
+        path, _, line = it["where"].rpartition(":")
+        if line.isdigit():
+            changed.setdefault(path, []).append(int(line))
+    on = build_sarif(build_review(changes, [], meta, changed=changed))
+    assert any(r["properties"]["in-diff"] for r in on["runs"][0]["results"])

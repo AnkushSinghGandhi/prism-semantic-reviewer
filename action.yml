@@ -27,6 +27,9 @@ outputs:
   review_markdown:
     description: 'Path to the generated markdown review'
     value: 'pr_review.md'
+  review_sarif:
+    description: 'Path to the generated SARIF file (GitHub code scanning)'
+    value: 'pr_review.sarif'
 runs:
   using: 'composite'
   steps:
@@ -44,10 +47,18 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md --json pr_review.json"
+        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md --json pr_review.json --sarif pr_review.sarif"
         if [ -n "${{ inputs.invariants }}" ]; then CMD="$CMD --invariants ${{ inputs.invariants }}"; fi
         if [ "${{ inputs.fail_on }}" != "none" ]; then CMD="$CMD --fail-on ${{ inputs.fail_on }}"; fi
         echo "$CMD"; eval "$CMD"
+
+    - name: Upload SARIF to code scanning
+      # Needs `permissions: security-events: write` in the calling workflow.
+      if: ${{ always() && hashFiles('pr_review.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: pr_review.sarif
+        category: prism
 
     - name: Post sticky PR comment
       if: ${{ always() && inputs.comment == 'true' && hashFiles('pr_review.md') != '' }}

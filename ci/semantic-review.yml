@@ -13,6 +13,7 @@ on:
 permissions:
   contents: read
   pull-requests: write        # needed to post the comment
+  security-events: write      # needed to upload SARIF to the Security tab
 
 jobs:
   semantic-review:
@@ -28,7 +29,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Generate semantic review (md + json + html)
+      - name: Generate semantic review (md + json + html + sarif)
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
@@ -40,8 +41,16 @@ jobs:
           fi
           python tools/semantic-review/diff_pr.py . \
             --base "$BASE" --head "$HEAD" \
-            --out pr_review.md --json pr_review.json --html pr_review.html $CORPUS
+            --out pr_review.md --json pr_review.json --html pr_review.html \
+            --sarif pr_review.sarif $CORPUS
           cat pr_review.md >> "$GITHUB_STEP_SUMMARY"   # also show in the run summary
+
+      - name: Upload SARIF to code scanning (Files-changed + Security tab)
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()               # publish findings even when the gate below fails
+        with:
+          sarif_file: pr_review.sarif
+          category: prism
 
       - name: Post sticky PR comment
         env:
