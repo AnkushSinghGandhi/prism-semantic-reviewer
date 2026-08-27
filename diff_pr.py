@@ -23,6 +23,7 @@ from extractor import analyze_repo             # noqa: E402
 from gitutil import (sh, export, ensure_local, git_toplevel,   # noqa: E402
                      current_branch, default_branch)
 import enforce as enforce_mod                  # noqa: E402
+import deps as deps_mod                        # noqa: E402
 
 CRIT, HIGH, MED, LOW = "🔴", "🟠", "🟡", "🟢"
 EDGES = [("e3_db_tables", "db"), ("e4_external", "external"),
@@ -104,6 +105,26 @@ def parse_changed_lines(diff_text):
 def changed_lines(repo, base, head):
     """{file: [head-side line numbers touched]} for `base..head` (see parse_changed_lines)."""
     return parse_changed_lines(sh("git", "-C", repo, "diff", "--no-color", base, head))
+
+
+def dependency_findings(repo, base, head):
+    """Capability-delta findings for any dependency manifest changed in `base..head` (feature #5).
+
+    Manifest bump detection is always on (cheap, offline); the capability scan fetches each version
+    from PyPI unless `PRISM_SCAN_DEPS=0`, degrading to ⚠ unresolved when offline — never assuming
+    safe. Returns [] when no manifest changed."""
+    names = [p for p in sh("git", "-C", repo, "diff", "--name-only", base, head).splitlines()
+             if deps_mod.is_manifest(p)]
+    if not names:
+        return []
+    provider = None if os.environ.get("PRISM_SCAN_DEPS") == "0" else deps_mod.pypi_source_provider
+    findings = []
+    for path in names:
+        old_map = deps_mod.parse_manifest(path, sh("git", "-C", repo, "show", f"{base}:{path}"))
+        new_map = deps_mod.parse_manifest(path, sh("git", "-C", repo, "show", f"{head}:{path}"))
+        for f in deps_mod.analyze_dependency_changes(old_map, new_map, source_provider=provider):
+            findings.append(dict(f, manifest=path))
+    return findings
 
 
 def auth_str(ep):
@@ -399,6 +420,8 @@ def render(changes, meta):
         L.append(f"> **{meta['summary']}**\n")
     if meta.get("intent_section"):
         L.append(meta["intent_section"])
+    if meta.get("deps_section"):
+        L.append(meta["deps_section"])
     if meta.get("inv_section"):
         L.append(meta["inv_section"])
     buckets = {CRIT: [], HIGH: [], MED: [], LOW: []}
@@ -517,6 +540,7 @@ def build_review(changes, findings, meta, changed=None):
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
             "shortstat": meta["shortstat"], "summary": meta.get("summary", ""),
             "invariants": findings or [], "contradictions": meta.get("contradictions", []),
+            "dependencies": meta.get("dependencies", []),
             "changed_lines": changed or {}, "changes": [cd(c) for c in changes]}
 
 
@@ -620,6 +644,16 @@ def build_sarif(review):
         in_diff = bool(p and ln is not None and ln in changed.get(p, ()))
         emit(rid, c.get("sev", HIGH), c.get("why", "intent contradiction"),
              p, ln, in_diff, f"intent::{c.get('claim', '')}::{c.get('loc', '')}")
+
+    for d in review.get("dependencies", []):    # dependency capability-delta (feature #5)
+        if not (d.get("gained") or d.get("unresolved")):
+            continue                            # a bump with no new capabilities isn't an alert
+        rid = "prism/dependency-capability"
+        rule(rid, "Prism dependency capability change")
+        path = d.get("manifest")
+        text = f"{d['name']} {d.get('old') or '(new)'}→{d['new']} — {d.get('why', '')}"
+        emit(rid, d.get("sev", MED), text, path, None, False,
+             f"dep::{d['name']}::{d.get('new', '')}")
 
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -804,8 +838,10 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
     changes = diff(base_eps, head_eps)
     changed = changed_lines(repo, b, h)              # head-side lines a PR comment can anchor to
     contradictions = intent_contradictions(title, changes, findings, body=body)
+    deps_findings = dependency_findings(repo, b, h)
     meta = dict(title=title, base=b, head=h, shortstat=shortstat, inv_section=inv_section,
                 intent_section=render_intent_section(contradictions), contradictions=contradictions,
+                deps_section=deps_mod.render_deps_section(deps_findings), dependencies=deps_findings,
                 summary=intent_summary(changes, findings))
     return dict(review=build_review(changes, findings, meta, changed), report=render(changes, meta),
                 findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps),

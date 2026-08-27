@@ -356,13 +356,17 @@ function render(){
   const contraHtml = contra.length ?
     `<div class="inv"><h2>🎭 Intent vs. behavior — PR describes itself as “${esc(contra[0].claim)}”, but the facts disagree</h2>`+
     contra.map(c=>`<div class="row"><div>${c.sev} ${esc(c.why).replace(/\x60/g,"")}</div></div>`).join("")+`</div>` : "";
+  const deps=(DATA.dependencies||[]).filter(d=>(d.gained&&d.gained.length)||d.unresolved);   // feature #5
+  const depsHtml = deps.length ?
+    `<div class="inv"><h2>📦 Dependency capability changes</h2>`+
+    deps.map(d=>`<div class="row"><div>${d.unresolved?"⚠":d.sev} <b>${esc(d.name)} ${esc(d.old||"(new)")}→${esc(d.new)}</b> — ${esc(d.why)}</div></div>`).join("")+`</div>` : "";
   const alerts=(DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
   const invHtml = alerts.length ?
     `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
     alerts.map(f=>`<div class="row"><div><b>${f.sev} ${f.kind}</b> — ${esc(f.stmt)}</div>`+
       (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
       (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")+`</div>` : "";
-  document.getElementById("invwrap").innerHTML = contraHtml + invHtml;
+  document.getElementById("invwrap").innerHTML = contraHtml + depsHtml + invHtml;
   const fbar=document.getElementById("filters"); fbar.innerHTML="";
   ["🔴","🟠","🟡","🟢"].forEach(s=>{const b=document.createElement("button");
     b.textContent=`${s} ${counts[s]||0}`; if(!active.has(s))b.classList.add("off");

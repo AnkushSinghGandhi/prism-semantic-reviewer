@@ -97,6 +97,15 @@ if(contra.length){
     + `</div>`;
 }
 
+// dependency capability panel (feature #5) — only bumps that widen or can't confirm the surface
+const deps = (DATA.dependencies||[]).filter(d=>(d.gained&&d.gained.length)||d.unresolved);
+if(deps.length){
+  document.getElementById("invwrap").innerHTML +=
+    `<div class="inv"><h2>📦 Dependency capability changes</h2>`+
+    deps.map(d=>`<div class="row"><div class="stmt">${d.unresolved?"⚠":d.sev} ${esc(d.name)} ${esc(d.old||"(new)")}→${esc(d.new)} — ${esc(d.why)}</div></div>`).join("")
+    + `</div>`;
+}
+
 // invariants panel
 const alerts = (DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
 if(alerts.length){
