@@ -392,6 +392,10 @@ function render(){
     fbar.appendChild(b);});
   renderList();
   document.getElementById("detail").innerHTML='<div class="empty">Select a change.</div>';
+  // deep links: ?open=N selects a change (shows its flow graph), ?invariants=1 opens the panel
+  const P=new URLSearchParams(location.search);
+  if(P.has("open")){const i=+P.get("open")||0, c=DATA.changes[i]; if(c){sel=i;renderList();renderDetail(c);}}
+  if(P.get("invariants")==="1") loadInvariants();
 }
 
 function renderList(){
