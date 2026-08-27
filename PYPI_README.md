@@ -7,6 +7,12 @@ into a short, ranked list of the things that actually matter: new endpoints, new
 new external calls, and data that now leaves the system. It cuts through refactor noise and points
 you at the exact lines that matter — and it's honest about what it couldn't resolve.
 
+Also: **traced PII leaks** (the exact field → where it leaves), **dependency bumps that gain new
+powers** (network/subprocess/native), PR **descriptions that contradict the code**, and the **rules
+your codebase follows** (discover, confirm, enforce, and blame the commit that broke one). Outputs to
+the terminal, a web UI, JSON, HTML, **SARIF**, inline PR comments, a triage label, and a Mermaid
+diagram. Full walkthrough: **The Complete Guide** in the repo (`blog/prism-complete-guide.md`).
+
 ## Install
 
 ```bash

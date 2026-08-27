@@ -10,6 +10,15 @@ couldn't figure out.
 
 > One line: it makes it impossible for an important change to hide inside a large PR.
 
+**📖 New here? Read [The Complete Guide](blog/prism-complete-guide.md)** — every feature, command,
+flag, and concept explained in plain English, with screenshots.
+
+**What Prism finds:** new/changed endpoints & auth · new DB writes · external calls · **PII that
+actually leaves** (traced, not guessed) · **dependency bumps that gain new powers** (network /
+subprocess / native code) · PR **descriptions that contradict the code** · rules your codebase has
+always followed (and the commit that broke one). Outputs to the terminal, a web UI, JSON, HTML,
+**SARIF** (GitHub Security tab), inline PR comments, a triage label, and a Mermaid flow diagram.
+
 ---
 
 ## Install
@@ -29,13 +38,17 @@ commands as `prism review` / `prism serve` / `prism invariants`.
 
 ## Commands
 
-Prism has three commands:
+Prism has four commands:
 
 | Command | What it does |
 |---------|--------------|
 | `prism review` | semantic diff of a PR / commit / branch range (for the terminal & CI) |
+| `prism post` | post a review to a GitHub PR: sticky comment, inline comments, triage label |
 | `prism serve`  | the interactive web UI (graph view), auto-selects your current repo |
-| `prism invariants` | learn the rules your codebase has always followed, from git history |
+| `prism invariants` | learn, **confirm**, enforce, and **blame** the rules your codebase follows |
+
+Run `prism review` with **no arguments** inside a repo to review the current branch vs. the default
+branch. Full flag-by-flag reference: **[the Complete Guide](blog/prism-complete-guide.md)**.
 
 The **repo** can be a **local path** *or* a **GitHub URL** (URLs are cloned into a cache at
 `~/.cache/prism` and reused).
