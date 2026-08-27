@@ -22,8 +22,8 @@ import tempfile
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from extractor import analyze_repo          # noqa: E402
-from gitutil import export, sh              # noqa: E402
+from extractor import analyze_repo                              # noqa: E402
+from gitutil import export, sh, ensure_local, git_toplevel     # noqa: E402
 
 
 def _norm(s):
@@ -254,15 +254,175 @@ def corpus(cands):
     return out
 
 
+# ---- confirm (moat part A: turn discovery into a confirmed corpus without hand-editing JSON) ----
+
+def confirm_candidate(cand, *, owner=None, keep_baseline=True):
+    """A confirmed copy of a discovered candidate: `confirmed=True`, owner recorded, and (default)
+    its discovered exceptions frozen as `baseline_exceptions` so enforce() treats them as known —
+    not as new violations this PR introduced. `keep_baseline=False` says 'these are latent bugs,
+    not accepted exceptions' and clears them, so enforce() will surface them as violations to fix."""
+    c = dict(cand)
+    c["confirmed"] = True
+    c["owner"] = owner if owner is not None else c.get("owner")
+    if not keep_baseline:
+        c["baseline_exceptions"] = []
+    return c
+
+
+def merge_corpus(existing, confirmed):
+    """Merge newly-confirmed invariants into an existing confirmed corpus, keyed by `id` (update in
+    place, append new), preserving the order of `existing` then appending genuinely new ones.
+    Neither input list is mutated."""
+    by_id = {c["id"]: dict(c) for c in existing}
+    order = [c["id"] for c in existing]
+    for c in confirmed:
+        if c["id"] not in by_id:
+            order.append(c["id"])
+        by_id[c["id"]] = dict(c)
+    return [by_id[i] for i in order]
+
+
+def _fmt_candidate(cand):
+    """One-screen summary of a candidate for the interactive prompt."""
+    obs = cand.get("observed", {})
+    L = [f"{cand['statement']}  [{cand.get('kind', '?')}, {cand.get('severity', '?')}]"]
+    if "ratio" in obs:
+        L.append(f"  holds {obs.get('ok')}/{obs.get('total')} ({int(obs.get('ratio', 0) * 100)}%)")
+    exc = cand.get("baseline_exceptions", [])
+    if exc:
+        L.append(f"  {len(exc)} exception(s):")
+        for e in exc[:6]:
+            L.append(f"    - {e['route']} — {e.get('why', '')} ({e.get('location', '')})")
+    return "\n".join(L)
+
+
+def run_confirm(in_path, corpus_path, *, ids=None, confirm_all=False, owner=None,
+                keep_baseline=True, input_fn=input, print_fn=print):
+    """Confirm discovered candidates into a confirmed corpus. Non-interactive when `ids` or
+    `confirm_all` is given; otherwise prompts per unconfirmed candidate
+    ([c]onfirm / [f]ix-not-baseline / [s]kip / [q]uit). Returns (merged_corpus, newly_confirmed)."""
+    discovered = json.load(open(in_path, encoding="utf-8"))
+    existing = json.load(open(corpus_path, encoding="utf-8")) if os.path.exists(corpus_path) else []
+    newly = []
+    for cand in discovered:
+        if confirm_all or (ids and cand["id"] in ids):
+            newly.append(confirm_candidate(cand, owner=owner, keep_baseline=keep_baseline))
+            continue
+        if ids is not None or confirm_all or cand.get("confirmed"):
+            continue                                    # non-interactive & unselected, or already done
+        print_fn("\n" + _fmt_candidate(cand))
+        ans = (input_fn("confirm? [c]onfirm / [f]ix / [s]kip / [q]uit: ") or "").strip().lower()[:1]
+        if ans == "q":
+            break
+        if ans in ("c", "f"):
+            newly.append(confirm_candidate(cand, owner=owner, keep_baseline=(ans == "c")))
+    merged = merge_corpus(existing, newly)
+    json.dump(merged, open(corpus_path, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+    return merged, newly
+
+
+# ---- semantic blame (moat part B: which commit first broke this rule) --------------------------
+
+def _eval_one(inv_id, eps):
+    """(total, ok, exceptions) for one invariant on a snapshot, or None if the id isn't evaluable.
+    Reuses the same evaluators discovery and enforce.py run — one source of truth for 'what holds'."""
+    if inv_id == "auth-before-write":
+        return eval_auth_before_write(eps)["auth-before-write"]
+    if inv_id == "pii-egress-authed":
+        return eval_pii_egress(eps)["pii-egress-authed"]
+    if inv_id.startswith("auth-group:"):
+        return eval_auth_by_group(eps).get(inv_id)
+    return None
+
+
+def blame_invariant(repo, inv_id, *, route=None, n=12, shas=None, facts_at=None):
+    """Semantic blame: the earliest sampled snapshot where `inv_id` first broke — overall (ratio
+    drops below 1.0) or, with `route`, where that specific endpoint first became an exception.
+    Snapshot-granular and honest: returns the commit plus the `window` (prev..commit) it falls in,
+    not a bisected exact commit. Returns a dict, or None if it never broke in the sampled history.
+
+    `shas`/`facts_at` are injectable so the walk is unit-testable without a real multi-commit repo."""
+    shas = shas if shas is not None else sample_commits(repo, n)      # oldest -> newest
+    facts_at = facts_at or (lambda s: snapshot_facts(repo, s))
+    prev = None
+    for sha in shas:
+        res = _eval_one(inv_id, facts_at(sha))
+        if res is None:
+            prev = sha
+            continue
+        total, ok, exc = res
+        exc_routes = {r for (r, _, _) in exc}
+        broke = (route in exc_routes) if route else (total > 0 and ok < total)
+        if broke:
+            return {"invariant": inv_id, "route": route, "commit": sha, "window": [prev, sha],
+                    "ok": ok, "total": total,
+                    "exceptions": [{"route": r, "why": w, "location": loc} for (r, w, loc) in exc]}
+        prev = sha
+    return None
+
+
+def render_blame(result, inv_id, route=None):
+    if result is None:
+        who = f" for `{route}`" if route else ""
+        return f"✓ `{inv_id}`{who} held across every sampled snapshot — no break found."
+    prev, sha = result["window"]
+    window = f"{prev}..{sha}" if prev else f"(first snapshot) {sha}"
+    L = [f"🩸 `{inv_id}` first broke at `{sha}`  (window `{window}`)",
+         f"   holds {result['ok']}/{result['total']} there."]
+    rows = ([e for e in result["exceptions"] if e["route"] == route] if route
+            else result["exceptions"])
+    if rows:
+        L.append("   offending endpoint(s):")
+        for e in rows[:8]:
+            L.append(f"     - {e['route']} — {e['why']} ({e['location']})")
+    L.append("   _snapshot-granular: the break is somewhere in that window; "
+             "sample more commits (--snapshots) to narrow it._")
+    return "\n".join(L)
+
+
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("repo")
+    ap = argparse.ArgumentParser(description="Discover, confirm, and blame codebase invariants.")
+    ap.add_argument("repo", nargs="?", help="repo path or URL (discover & blame; default: cwd repo)")
     ap.add_argument("--snapshots", type=int, default=6)
     ap.add_argument("--out", default="invariants.discovered.json")
     ap.add_argument("--report", default="invariants_report.md")
+    # confirm mode (part A)
+    ap.add_argument("--confirm", action="store_true",
+                    help="confirm discovered candidates into a corpus (interactive unless --id/--all)")
+    ap.add_argument("--in", dest="in_path", default="invariants.discovered.json",
+                    help="discovered corpus to confirm from (--confirm)")
+    ap.add_argument("--corpus", default="invariants.confirmed.json",
+                    help="confirmed corpus to create/update (--confirm)")
+    ap.add_argument("--id", action="append", metavar="INVARIANT_ID",
+                    help="confirm this id non-interactively (repeatable)")
+    ap.add_argument("--all", action="store_true", help="confirm every candidate non-interactively")
+    ap.add_argument("--owner", help="record this owner on confirmed invariants")
+    ap.add_argument("--drop-baseline", action="store_true",
+                    help="treat current exceptions as bugs to fix (don't baseline them)")
+    # blame mode (part B)
+    ap.add_argument("--blame", metavar="INVARIANT_ID",
+                    help="semantic blame: find the commit where INVARIANT_ID first broke")
+    ap.add_argument("--route", help="blame one endpoint route (with --blame)")
     args = ap.parse_args()
 
-    shas, cands = discover(args.repo, args.snapshots)
+    if args.confirm:
+        merged, newly = run_confirm(args.in_path, args.corpus, ids=args.id, confirm_all=args.all,
+                                    owner=args.owner, keep_baseline=not args.drop_baseline)
+        confirmed_total = sum(1 for c in merged if c.get("confirmed"))
+        print(f"[confirmed {len(newly)} candidate(s); {confirmed_total} invariant(s) now confirmed "
+              f"in {args.corpus}]")
+        return
+
+    repo = (ensure_local(args.repo) if args.repo else git_toplevel(os.getcwd()))
+    if not repo:
+        ap.error("no repo given and the current directory is not a git repo")
+
+    if args.blame:
+        result = blame_invariant(repo, args.blame, route=args.route, n=args.snapshots)
+        print(render_blame(result, args.blame, args.route))
+        return
+
+    shas, cands = discover(repo, args.snapshots)
     report = render(shas, cands)
     print(report)
     open(args.report, "w").write(report)
