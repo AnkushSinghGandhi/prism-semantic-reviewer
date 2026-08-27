@@ -10,6 +10,7 @@ def main():
         print("\nUsage: prism <command> [options]")
         print("\nCommands:")
         print("  review    Run a semantic review of a PR or commit range")
+        print("  post      Post a review to a PR (sticky comment, inline comments, label)")
         print("  serve     Start the Prism web UI")
         print("  invariants Discover baseline invariants from a repository's history")
         print("\nRun 'prism <command> --help' for more information on a command.")
@@ -23,6 +24,11 @@ def main():
         import diff_pr
         # No args → review the current repo's branch vs. its default branch (diff_pr resolves it).
         diff_pr.main()
+    elif command == "post":
+        from ci import post_review
+        if len(sys.argv) == 1:
+            sys.argv.append("--help")
+        post_review.main()
     elif command == "serve":
         import serve
         serve.main()
