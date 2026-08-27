@@ -129,6 +129,7 @@
     <span class="lbl mono">repo</span>
     <input id="repo" style="min-width:440px" placeholder="/path/to/local/repo">
     <button onclick="loadRepo()"><b>Load</b></button>
+    <button onclick="loadInvariants()" title="Discover & confirm the rules this codebase follows">⚖ Invariants</button>
   </div>
   <div class="bar">
     <span class="lbl mono">PR</span>
@@ -174,6 +175,7 @@
   </div>
 </div>
 <div id="invwrap"></div>
+<div id="invpanel"></div>
 <main>
   <div id="list"><div class="filters" id="filters"></div><div id="items"></div></div>
   <div id="detail"><div class="empty">Run a review, then select a change.</div></div>
@@ -214,6 +216,55 @@ async function getJSON(url){
   let d; try{d=JSON.parse(t);}catch(_){throw new Error(`HTTP ${r.status}: ${t.slice(0,140)}`);}
   if(!r.ok||d.error) throw new Error(d.error||`HTTP ${r.status}`);
   return d;
+}
+async function postJSON(url,body){
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  const t=await r.text();
+  let d; try{d=JSON.parse(t);}catch(_){throw new Error(`HTTP ${r.status}: ${t.slice(0,140)}`);}
+  if(!r.ok||d.error) throw new Error(d.error||`HTTP ${r.status}`);
+  return d;
+}
+
+// ⚖ Invariants — discover candidate rules and confirm them into the corpus (the moat, in the UI)
+async function loadInvariants(){
+  const repo=val("repo").trim();
+  if(!repo){status("Enter a local repo path first.");return;}
+  status("Discovering invariants… (samples git history — the first run can take a moment)");
+  try{
+    const d=await getJSON(apiURL("api/invariants",{repo}));
+    renderInvPanel(d);
+    status(`${(d.candidates||[]).length} candidate invariant(s).`+
+           (d.can_confirm?" Confirm the ones that are intentional.":
+            " (read-only — start `prism serve --invariants <path>` to confirm)"));
+    document.getElementById("invpanel").scrollIntoView({behavior:"smooth",block:"nearest"});
+  }catch(e){status("Error: "+e);}
+}
+function renderInvPanel(d){
+  const confirmed=new Set(d.confirmed_ids||[]);
+  const rows=(d.candidates||[]).map(c=>{
+    const obs=c.observed||{};
+    const held=obs.ratio!=null?`holds ${obs.ok}/${obs.total} (${Math.round(obs.ratio*100)}%)`:"";
+    const exc=c.baseline_exceptions||[];
+    const excHtml=exc.length?`<div class="det">${exc.length} exception(s): ${esc(exc.slice(0,4).map(e=>e.route).join(", "))}${exc.length>4?" …":""}</div>`:"";
+    const act=confirmed.has(c.id)?`<span class="det" style="color:var(--low)">✓ confirmed</span>`
+      :d.can_confirm?`<button onclick="confirmInv('${esc(c.id)}')">Confirm</button>`
+      :`<span class="det">read-only</span>`;
+    return `<div class="row"><div><b>${esc(c.severity||"")} ${esc(c.statement)}</b> <span class="det">[${esc(c.kind||"")}]</span></div>`+
+      (held?`<div class="det">${esc(held)}</div>`:"")+excHtml+
+      `<div style="margin-top:6px">${act}</div></div>`;
+  }).join("");
+  document.getElementById("invpanel").innerHTML=
+    `<div class="inv"><h2>⚖ Invariants — confirm the rules this codebase already follows</h2>`+
+    (rows||`<div class="det">no candidate invariants discovered</div>`)+`</div>`;
+}
+async function confirmInv(id){
+  const repo=val("repo").trim();
+  status(`Confirming ${id}…`);
+  try{
+    await postJSON(apiURL("api/invariants/confirm"),{repo,id});
+    await loadInvariants();                 // refresh so it shows ✓ confirmed
+    status(`Confirmed “${id}” — it will now be enforced on every review.`);
+  }catch(e){status("Error: "+e);}
 }
 
 function val(id){return document.getElementById(id).value;}

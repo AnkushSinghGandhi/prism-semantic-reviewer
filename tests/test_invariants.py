@@ -5,7 +5,7 @@ import json
 from extractor import analyze_repo
 from conftest import BLOG
 from invariants import (confirm_candidate, merge_corpus, run_confirm,
-                        blame_invariant, render_blame, _eval_one)
+                        blame_invariant, render_blame, _eval_one, bisect_break)
 
 
 def _cand(cid, exc=1):
@@ -68,6 +68,22 @@ def test_blame_finds_the_breaking_snapshot():
                         facts_at=lambda s: facts[s])
     assert r["commit"] == "s2" and r["window"] == ["s1", "s2"]
     assert any("open-write" in e["route"] for e in r["exceptions"])
+
+
+def test_bisect_break_finds_exact_transition_commit():
+    """Binary search over a window whose first two commits hold and the rest break → the first
+    breaking commit is c2 (index 2)."""
+    head = analyze_repo(BLOG)
+    clean = [e for e in head if "open-write" not in e.route]     # holds
+    commits = ["c0", "c1", "c2", "c3", "c4"]
+    facts = {"c0": clean, "c1": clean, "c2": head, "c3": head, "c4": head}
+    assert bisect_break("auth-before-write", commits, lambda s: facts[s]) == "c2"
+
+
+def test_bisect_break_none_when_window_never_breaks():
+    head = analyze_repo(BLOG)
+    clean = [e for e in head if "open-write" not in e.route]
+    assert bisect_break("auth-before-write", ["c0", "c1"], lambda s: clean) is None
 
 
 def test_blame_route_scoped_and_clean_history_returns_none():

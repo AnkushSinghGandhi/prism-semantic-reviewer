@@ -335,30 +335,62 @@ def _eval_one(inv_id, eps):
     return None
 
 
-def blame_invariant(repo, inv_id, *, route=None, n=12, shas=None, facts_at=None):
+def _broke(inv_id, eps, route=None):
+    """Does `inv_id` break on this snapshot (for `route`, or overall)?"""
+    res = _eval_one(inv_id, eps)
+    if res is None:
+        return False
+    total, ok, exc = res
+    return (route in {r for (r, _, _) in exc}) if route else (total > 0 and ok < total)
+
+
+def bisect_break(inv_id, commits, facts_at, *, route=None):
+    """First sha in `commits` (oldest→newest, all after a known-holding baseline) where `inv_id`
+    breaks — binary search assuming a single hold→broke transition in the window. `commits` and
+    `facts_at` are injected, so this is pure and unit-testable. None if none break."""
+    if not commits or not _broke(inv_id, facts_at(commits[-1]), route):
+        return None
+    lo, hi = 0, len(commits) - 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if _broke(inv_id, facts_at(commits[mid]), route):
+            hi = mid
+        else:
+            lo = mid + 1
+    return commits[lo]
+
+
+def blame_invariant(repo, inv_id, *, route=None, n=12, exact=False, shas=None, facts_at=None):
     """Semantic blame: the earliest sampled snapshot where `inv_id` first broke — overall (ratio
     drops below 1.0) or, with `route`, where that specific endpoint first became an exception.
-    Snapshot-granular and honest: returns the commit plus the `window` (prev..commit) it falls in,
-    not a bisected exact commit. Returns a dict, or None if it never broke in the sampled history.
+    Returns a dict (or None if it never broke in the sampled history) with the snapshot `commit`
+    and the `window` (prev..commit) it falls in. With `exact=True` and a known-good `prev`, it
+    binary-searches the commits in that window and adds `commit_exact` — the precise breaking commit.
 
     `shas`/`facts_at` are injectable so the walk is unit-testable without a real multi-commit repo."""
     shas = shas if shas is not None else sample_commits(repo, n)      # oldest -> newest
     facts_at = facts_at or (lambda s: snapshot_facts(repo, s))
-    prev = None
+    prev, result = None, None
     for sha in shas:
         res = _eval_one(inv_id, facts_at(sha))
-        if res is None:
+        if res is not None and _broke(inv_id, facts_at(sha), route):
+            total, ok, exc = res
+            result = {"invariant": inv_id, "route": route, "commit": sha, "window": [prev, sha],
+                      "ok": ok, "total": total,
+                      "exceptions": [{"route": r, "why": w, "location": loc} for (r, w, loc) in exc]}
+            break
+        if res is not None:
             prev = sha
-            continue
-        total, ok, exc = res
-        exc_routes = {r for (r, _, _) in exc}
-        broke = (route in exc_routes) if route else (total > 0 and ok < total)
-        if broke:
-            return {"invariant": inv_id, "route": route, "commit": sha, "window": [prev, sha],
-                    "ok": ok, "total": total,
-                    "exceptions": [{"route": r, "why": w, "location": loc} for (r, w, loc) in exc]}
-        prev = sha
-    return None
+    if result is None:
+        return None
+    if exact and result["window"][0]:                                # narrow within prev..commit
+        lo, hi = result["window"]
+        commits = sh("git", "-C", repo, "rev-list", "--first-parent", "--reverse",
+                     f"{lo}..{hi}").splitlines() if repo else []
+        exact_sha = bisect_break(inv_id, commits, facts_at, route=route)
+        if exact_sha:
+            result["commit_exact"] = exact_sha
+    return result
 
 
 def render_blame(result, inv_id, route=None):
@@ -367,16 +399,21 @@ def render_blame(result, inv_id, route=None):
         return f"✓ `{inv_id}`{who} held across every sampled snapshot — no break found."
     prev, sha = result["window"]
     window = f"{prev}..{sha}" if prev else f"(first snapshot) {sha}"
-    L = [f"🩸 `{inv_id}` first broke at `{sha}`  (window `{window}`)",
-         f"   holds {result['ok']}/{result['total']} there."]
+    if result.get("commit_exact"):
+        L = [f"🩸 `{inv_id}` first broke at `{result['commit_exact']}`  (exact, in window `{window}`)",
+             f"   holds {result['ok']}/{result['total']} at the snapshot."]
+    else:
+        L = [f"🩸 `{inv_id}` first broke at `{sha}`  (window `{window}`)",
+             f"   holds {result['ok']}/{result['total']} there."]
     rows = ([e for e in result["exceptions"] if e["route"] == route] if route
             else result["exceptions"])
     if rows:
         L.append("   offending endpoint(s):")
         for e in rows[:8]:
             L.append(f"     - {e['route']} — {e['why']} ({e['location']})")
-    L.append("   _snapshot-granular: the break is somewhere in that window; "
-             "sample more commits (--snapshots) to narrow it._")
+    if not result.get("commit_exact"):
+        L.append("   _snapshot-granular: the break is somewhere in that window; "
+                 "add --exact (or more --snapshots) to narrow it._")
     return "\n".join(L)
 
 
@@ -403,6 +440,8 @@ def main():
     ap.add_argument("--blame", metavar="INVARIANT_ID",
                     help="semantic blame: find the commit where INVARIANT_ID first broke")
     ap.add_argument("--route", help="blame one endpoint route (with --blame)")
+    ap.add_argument("--exact", action="store_true",
+                    help="bisect the blame window for the precise breaking commit (slower)")
     args = ap.parse_args()
 
     if args.confirm:
@@ -418,7 +457,8 @@ def main():
         ap.error("no repo given and the current directory is not a git repo")
 
     if args.blame:
-        result = blame_invariant(repo, args.blame, route=args.route, n=args.snapshots)
+        result = blame_invariant(repo, args.blame, route=args.route, n=args.snapshots,
+                                 exact=args.exact)
         print(render_blame(result, args.blame, args.route))
         return
 
