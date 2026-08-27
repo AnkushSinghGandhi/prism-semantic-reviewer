@@ -3,7 +3,7 @@ analyzed 'head' endpoints — that exercises the real diff() code path without a
 from conftest import BLOG
 from extractor import analyze_repo
 from diff_pr import (diff, parse_changed_lines, build_review, build_sarif, intent_summary,
-                     parse_intent, intent_contradictions)
+                     parse_intent, intent_contradictions, mermaid_sequence)
 
 
 def test_new_unauth_write_endpoint_is_critical():
@@ -147,6 +147,22 @@ def test_intent_contradiction_flows_into_review_and_sarif():
     assert review["contradictions"] == cons
     ids = {r["ruleId"] for r in build_sarif(review)["runs"][0]["results"]}
     assert "prism/intent-contradiction" in ids
+
+
+def test_mermaid_sequence_renders_changed_endpoints():
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]      # open-write is "new"
+    changes = diff(base, head)
+    mer = mermaid_sequence(changes)
+    assert mer.startswith("```mermaid\nsequenceDiagram") and mer.rstrip().endswith("```")
+    assert "participant Client" in mer
+    assert "Client->>" in mer and "open-write" in mer            # the new endpoint is drawn
+    assert ";" not in mer                                        # sanitized — no stray separators
+
+
+def test_mermaid_empty_when_no_changes():
+    eps = analyze_repo(BLOG)
+    assert mermaid_sequence(diff(eps, eps)) == ""
 
 
 def test_sarif_is_valid_2_1_0_and_maps_severity():

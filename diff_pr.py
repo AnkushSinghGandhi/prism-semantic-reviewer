@@ -13,6 +13,7 @@ review: what changed, how it flows, where to look, and what stayed unknown.
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import shutil
@@ -412,6 +413,43 @@ def render_intent_section(contradictions):
     return "\n".join(L)
 
 
+def _mm_id(s):
+    return ("N" + re.sub(r"[^A-Za-z0-9]", "", str(s))[:24]) or "N"
+
+
+def _mm_label(s):
+    """Sanitize text for a Mermaid message label (no `;` `#` newlines, no `->` arrow confusion)."""
+    return re.sub(r"[;#`\n<>|]", " ", str(s).replace("->", "→")).strip() or "?"
+
+
+def mermaid_sequence(changes, cap=12):
+    """A Mermaid `sequenceDiagram` of the PR's before→after flow — built from our own facts, not an
+    LLM drawing. Wrapped in a ```mermaid fence so GitHub renders it inline in the PR comment.
+    Only changed endpoints (new / changed / removed) participate; capped so large PRs stay legible."""
+    drawn = [c for c in changes if c["kind"] in ("NEW ENDPOINT", "CHANGED", "REMOVED ENDPOINT")]
+    if not drawn:
+        return ""
+    tag = {"NEW ENDPOINT": "🆕", "REMOVED ENDPOINT": "➖"}
+    L = ["```mermaid", "sequenceDiagram", "    participant Client"]
+    seen = set()
+    for c in drawn[:cap]:
+        ep = c["ep"]
+        hid = _mm_id(ep.handler or c["route"])
+        if hid not in seen:
+            L.append(f"    participant {hid} as {_mm_label(ep.handler or c['route'])}")
+            seen.add(hid)
+        meth = ",".join(ep.methods) or "?"
+        L.append(f"    Client->>{hid}: {tag.get(c['kind'], c['sev'])} {_mm_label(meth)} "
+                 f"{_mm_label(c['route'])}")
+        for t in sorted(items(ep, "e3_db_tables")):
+            name, _, kind = t.partition(":")
+            L.append(f"    {hid}->>Database: {_mm_label((kind or 'access') + ' ' + name)}")
+        for x in sorted(items(ep, "e4_external")):
+            L.append(f"    {hid}->>External: {_mm_label(x.split(' -> ', 1)[-1])}")
+    L.append("```")
+    return "\n".join(L)
+
+
 def render(changes, meta):
     L = []
     L.append(f"# Semantic Review — {meta['title']}")
@@ -433,6 +471,10 @@ def render(changes, meta):
     L.append("|--|--------|-------|")
     for c in changes:
         L.append(f"| {c['sev']} | {c['kind']} | `{c['route']}` |")
+    mer = mermaid_sequence(changes)
+    if mer:
+        L.append("\n### 🔀 Flow (before → after)\n")
+        L.append(mer)
     L.append("\n---\n")
     for c in changes:
         ep = c["ep"]
