@@ -157,9 +157,11 @@ jobs:
           comment: 'true'                     # post/update a sticky PR comment (default: true)
 ```
 
-Inputs: `github_token` (default `${{ github.token }}`), `fail_on`, `invariants`, `comment`.
-The Action installs `prism-semantic-reviewer` from PyPI, reviews the PR, posts a sticky comment,
-and (with `fail_on`) fails the check when the PR introduces a violation.
+Inputs: `github_token` (default `${{ github.token }}`), `fail_on`, `invariants`, `comment`,
+`inline`. The Action installs `prism-semantic-reviewer` from PyPI, reviews the PR, posts a sticky
+comment, and (with `fail_on`) fails the check when the PR introduces a violation. With `inline`
+(default `true`) it also pins each finding as an inline review comment on the exact changed line —
+findings whose location isn't in the PR's diff stay in the sticky comment.
 
 ---
 

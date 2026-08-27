@@ -53,6 +53,40 @@ def _dedupe(seq):
     return out
 
 
+def parse_changed_lines(diff_text):
+    """Right-side (head) line numbers present in a unified diff, keyed by file path.
+
+    These are the *only* lines a GitHub review comment can anchor to — a finding whose location
+    isn't in this set can't be pinned (GitHub 422s), so the caller rolls it into the summary
+    instead. Pure string parsing (unit-tested); removed ('-') and no-newline ('\\') lines don't
+    advance the right-side counter, and a deleted file (`+++ /dev/null`) contributes nothing."""
+    out, path, right = {}, None, 0
+    for line in diff_text.splitlines():
+        if line.startswith("+++ "):
+            p = line[4:].strip()
+            if p.startswith("b/"):
+                p = p[2:]
+            path = None if p == "/dev/null" else p
+        elif line.startswith("@@"):
+            try:                                         # @@ -a,b +c,d @@
+                seg = line.split("+", 1)[1].split(" ", 1)[0]
+                right = int(seg.split(",", 1)[0])
+            except (IndexError, ValueError):
+                right = 0
+        elif path is None:
+            continue
+        elif line.startswith("+") and not line.startswith("+++"):
+            out.setdefault(path, set()).add(right); right += 1
+        elif line.startswith(" "):
+            out.setdefault(path, set()).add(right); right += 1
+    return {p: sorted(v) for p, v in out.items()}
+
+
+def changed_lines(repo, base, head):
+    """{file: [head-side line numbers touched]} for `base..head` (see parse_changed_lines)."""
+    return parse_changed_lines(sh("git", "-C", repo, "diff", "--no-color", base, head))
+
+
 def auth_str(ep):
     e = ep.e2_auth
     if e.status == "?":
@@ -272,7 +306,7 @@ def build_diff_graph(base_ep, head_ep):
     return {"nodes": nodes, "edges": edges}
 
 
-def build_review(changes, findings, meta):
+def build_review(changes, findings, meta, changed=None):
     """Structured review for the JSON / HTML / web outputs."""
     def cd(c):
         ep = c["ep"]
@@ -292,7 +326,7 @@ def build_review(changes, findings, meta):
                 "investigate": investigate, "unknowns": unknowns(ep), "graph": graph}
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
             "shortstat": meta["shortstat"], "invariants": findings or [],
-            "changes": [cd(c) for c in changes]}
+            "changed_lines": changed or {}, "changes": [cd(c) for c in changes]}
 
 
 def _gh_owner_repo(url):
@@ -456,8 +490,9 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
         findings = enforce_mod.enforce(json.load(open(invariants_path)), base_eps, head_eps)
         inv_section = enforce_mod.render_section(findings)
     changes = diff(base_eps, head_eps)
+    changed = changed_lines(repo, b, h)              # head-side lines a PR comment can anchor to
     meta = dict(title=title, base=b, head=h, shortstat=shortstat, inv_section=inv_section)
-    return dict(review=build_review(changes, findings, meta), report=render(changes, meta),
+    return dict(review=build_review(changes, findings, meta, changed), report=render(changes, meta),
                 findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps))
 
 

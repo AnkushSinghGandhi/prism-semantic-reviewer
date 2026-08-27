@@ -19,6 +19,10 @@ inputs:
     description: 'Post the review as a sticky PR comment (true/false)'
     required: false
     default: 'true'
+  inline:
+    description: 'Also pin each finding as an inline review comment on the exact changed line (true/false)'
+    required: false
+    default: 'true'
 outputs:
   review_markdown:
     description: 'Path to the generated markdown review'
@@ -40,7 +44,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md"
+        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md --json pr_review.json"
         if [ -n "${{ inputs.invariants }}" ]; then CMD="$CMD --invariants ${{ inputs.invariants }}"; fi
         if [ "${{ inputs.fail_on }}" != "none" ]; then CMD="$CMD --fail-on ${{ inputs.fail_on }}"; fi
         echo "$CMD"; eval "$CMD"
@@ -52,6 +56,9 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github_token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: |
-        python "${GITHUB_ACTION_PATH}/ci/post_review.py" \
-          "${{ github.event.pull_request.number }}" pr_review.md \
+        POST_ARGS="${{ github.event.pull_request.number }} pr_review.md"
+        if [ "${{ inputs.inline }}" = "true" ] && [ -f pr_review.json ]; then
+          POST_ARGS="$POST_ARGS --json pr_review.json --inline"
+        fi
+        python "${GITHUB_ACTION_PATH}/ci/post_review.py" $POST_ARGS \
           || echo "::warning::could not post comment — ensure the job has 'permissions: pull-requests: write'"

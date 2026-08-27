@@ -33,3 +33,10 @@ dist/
 build/
 *.egg-info/
 
+# Local docs / notes — not for commit
+NEXT.md
+TUTORIAL.md
+USAGE.md
+later.md
+plan.md
+
