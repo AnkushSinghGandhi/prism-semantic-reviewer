@@ -2,7 +2,7 @@
 analyzed 'head' endpoints — that exercises the real diff() code path without a second fixture."""
 from conftest import BLOG
 from extractor import analyze_repo
-from diff_pr import diff, parse_changed_lines, build_review, build_sarif
+from diff_pr import diff, parse_changed_lines, build_review, build_sarif, intent_summary
 
 
 def test_new_unauth_write_endpoint_is_critical():
@@ -69,6 +69,29 @@ def _blog_review():
     changes = diff(base, head)
     meta = dict(title="t", base="b", head="h", shortstat="", inv_section="")
     return build_review(changes, [], meta, changed={})
+
+
+def test_intent_summary_counts_new_endpoint_and_write():
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]      # open-write is "new"
+    s = intent_summary(diff(base, head), [])
+    assert s.startswith("This PR adds ") and "endpoint" in s
+    assert "DB write" in s                                       # open-write writes a table
+
+
+def test_intent_summary_no_change_is_honest():
+    head = analyze_repo(BLOG)
+    assert intent_summary(diff(head, head), []) == \
+        "This PR makes no changes to routing, auth, data, or external calls (internal logic only)."
+
+
+def test_intent_summary_reports_invariant_events():
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]
+    findings = [{"kind": "NEW VIOLATION", "sev": "🔴", "stmt": "x"},
+                {"kind": "WEAKENING", "sev": "🔴", "stmt": "y"}]
+    s = intent_summary(diff(base, head), findings)
+    assert "introduces 1 invariant violation" in s and "weakens 1 invariant" in s
 
 
 def test_sarif_is_valid_2_1_0_and_maps_severity():

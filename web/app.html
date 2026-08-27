@@ -19,6 +19,8 @@
   input{min-width:340px}select{min-width:340px;max-width:520px}
   button{cursor:pointer}button:hover{border-color:var(--link)}
   .sub{color:var(--mut);font-size:12.5px;margin-top:8px}
+  .summary{font-size:14px;font-weight:600;line-height:1.4;margin-top:8px}
+  .summary:empty{display:none}
   .tally{display:flex;gap:12px;margin-top:6px;font-size:12.5px}
   .inv{margin:12px 18px 0;border:1px solid var(--crit);border-radius:8px;background:rgba(248,81,73,.08)}
   .inv h2{margin:0;padding:9px 13px;font-size:13px;border-bottom:1px solid var(--line)}
@@ -151,6 +153,7 @@
   <input type="hidden" id="prnum"><input type="hidden" id="commit">
   <input type="hidden" id="base"><input type="hidden" id="head">
   <div class="sub" id="status">Enter a local repo path and hit Load — then pick a PR, or compare two branches or two commits.</div>
+  <div class="summary" id="summary"></div>
   <div class="tally" id="tally"></div>
 </header>
 <div id="welcome">
@@ -293,6 +296,7 @@ async function review(){
 
 function render(){
   document.body.classList.add("loaded");   // swap the welcome screen for the results layout
+  document.getElementById("summary").textContent = DATA.summary || "";
   const counts={}; DATA.changes.forEach(c=>counts[c.sev]=(counts[c.sev]||0)+1);
   document.getElementById("tally").innerHTML=
     ["🔴","🟠","🟡","🟢"].filter(s=>counts[s]).map(s=>`<b>${s} ${counts[s]}</b>`).join("&nbsp;&nbsp;")

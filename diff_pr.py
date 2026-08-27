@@ -223,10 +223,73 @@ def diff(base_eps, head_eps):
     return changes
 
 
+def _plural(n, word):
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def _english_join(parts):
+    parts = list(parts)
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _names(names, cap=3):
+    xs = sorted(names)
+    shown = ", ".join(f"`{x}`" for x in xs[:cap])
+    return shown + (f" +{len(xs) - cap} more" if len(xs) > cap else "")
+
+
+def intent_summary(changes, findings):
+    """One deterministic sentence describing this PR's behavioral change, computed from the same
+    verified facts — every number traces to a `file:line`, so (unlike an LLM summary) it can't
+    invent a change that isn't there or miss one that is."""
+    new_eps = sum(1 for c in changes if c["kind"] == "NEW ENDPOINT")
+    removed = sum(1 for c in changes if c["kind"] == "REMOVED ENDPOINT")
+    writes, externals, pii = set(), set(), set()
+    for c in changes:
+        if c["kind"] not in ("NEW ENDPOINT", "CHANGED"):
+            continue
+        ep, base = c["ep"], c.get("base_ep")
+        def new(edge):                                    # facts on head not already on base
+            cur = items(ep, edge)
+            return cur if base is None else cur - items(base, edge)
+        writes |= {t.split(":")[0] for t in new("e3_db_tables") if ":write" in t}
+        externals |= new("e4_external")
+        pii |= new("e6_pii")
+    findings = findings or []
+    violations = sum(1 for f in findings if f["kind"] == "NEW VIOLATION")
+    weakenings = sum(1 for f in findings if f["kind"] == "WEAKENING")
+
+    adds = []
+    if new_eps:
+        adds.append(_plural(new_eps, "endpoint"))
+    if writes:
+        adds.append(_plural(len(writes), "new DB write") + " to " + _names(writes))
+    if externals:
+        adds.append(_plural(len(externals), "new external call") + " to " + _names(externals))
+    if pii:
+        adds.append(_plural(len(pii), "new PII signal"))
+    segments = []
+    if adds:
+        segments.append("adds " + _english_join(adds))
+    if removed:
+        segments.append("removes " + _plural(removed, "endpoint"))
+    if violations:
+        segments.append("introduces " + _plural(violations, "invariant violation"))
+    if weakenings:
+        segments.append("weakens " + _plural(weakenings, "invariant"))
+    if not segments:
+        return "This PR makes no changes to routing, auth, data, or external calls (internal logic only)."
+    return "This PR " + _english_join(segments) + "."
+
+
 def render(changes, meta):
     L = []
     L.append(f"# Semantic Review — {meta['title']}")
     L.append(f"\n`{meta['base']}` → `{meta['head']}`  |  line diff: {meta['shortstat']}\n")
+    if meta.get("summary"):
+        L.append(f"> **{meta['summary']}**\n")
     if meta.get("inv_section"):
         L.append(meta["inv_section"])
     buckets = {CRIT: [], HIGH: [], MED: [], LOW: []}
@@ -343,7 +406,8 @@ def build_review(changes, findings, meta, changed=None):
                 "detail": c.get("detail", ""), "auth": auth_str(ep), "flow": flow(ep),
                 "investigate": investigate, "unknowns": unknowns(ep), "graph": graph}
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
-            "shortstat": meta["shortstat"], "invariants": findings or [],
+            "shortstat": meta["shortstat"], "summary": meta.get("summary", ""),
+            "invariants": findings or [],
             "changed_lines": changed or {}, "changes": [cd(c) for c in changes]}
 
 
@@ -613,7 +677,8 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
         inv_section = enforce_mod.render_section(findings)
     changes = diff(base_eps, head_eps)
     changed = changed_lines(repo, b, h)              # head-side lines a PR comment can anchor to
-    meta = dict(title=title, base=b, head=h, shortstat=shortstat, inv_section=inv_section)
+    meta = dict(title=title, base=b, head=h, shortstat=shortstat, inv_section=inv_section,
+                summary=intent_summary(changes, findings))
     return dict(review=build_review(changes, findings, meta, changed), report=render(changes, meta),
                 findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps))
 
