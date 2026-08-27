@@ -129,6 +129,7 @@
     <span class="lbl mono">repo</span>
     <input id="repo" style="min-width:440px" placeholder="/path/to/local/repo">
     <button onclick="loadRepo()"><b>Load</b></button>
+    <button onclick="reviewDefault()" title="Review the current branch vs. the default branch">Branch vs default</button>
     <button onclick="loadInvariants()" title="Discover & confirm the rules this codebase follows">⚖ Invariants</button>
   </div>
   <div class="bar">
@@ -249,9 +250,11 @@ function renderInvPanel(d){
     const act=confirmed.has(c.id)?`<span class="det" style="color:var(--low)">✓ confirmed</span>`
       :d.can_confirm?`<button onclick="confirmInv('${esc(c.id)}')">Confirm</button>`
       :`<span class="det">read-only</span>`;
+    const canBlame=c.id==="auth-before-write"||c.id==="pii-egress-authed"||c.id.indexOf("auth-group:")===0;
+    const blame=canBlame?` <button onclick="blameInv('${esc(c.id)}')" title="Which commit first broke this rule?">🩸 Blame</button>`:"";
     return `<div class="row"><div><b>${esc(c.severity||"")} ${esc(c.statement)}</b> <span class="det">[${esc(c.kind||"")}]</span></div>`+
       (held?`<div class="det">${esc(held)}</div>`:"")+excHtml+
-      `<div style="margin-top:6px">${act}</div></div>`;
+      `<div style="margin-top:6px">${act}${blame}</div><div class="det mono" id="blame-${esc(c.id).replace(/[^a-z-]/gi,'_')}"></div></div>`;
   }).join("");
   document.getElementById("invpanel").innerHTML=
     `<div class="inv"><h2>⚖ Invariants — confirm the rules this codebase already follows</h2>`+
@@ -265,6 +268,21 @@ async function confirmInv(id){
     await loadInvariants();                 // refresh so it shows ✓ confirmed
     status(`Confirmed “${id}” — it will now be enforced on every review.`);
   }catch(e){status("Error: "+e);}
+}
+async function blameInv(id){
+  const repo=val("repo").trim();
+  const slot=document.getElementById("blame-"+id.replace(/[^a-z-]/gi,'_'));
+  if(slot) slot.textContent="🩸 blaming… (walks git history — a moment)";
+  try{
+    const d=await getJSON(apiURL("api/blame",{repo,id,exact:"1"}));
+    if(slot) slot.textContent=d.text;
+  }catch(e){ if(slot) slot.textContent="Error: "+e; }
+}
+// Gap #4 — one-click "review current branch vs. the default branch" (backend auto-detects)
+function reviewDefault(){
+  const repo=val("repo").trim();
+  if(!repo){status("Enter a local repo path first.");return;}
+  setVal("pr",""); clearRefs(); review();   // no refs sent → /api/review auto-detects branch↔default
 }
 
 function val(id){return document.getElementById(id).value;}

@@ -74,6 +74,18 @@ def test_post_confirm_writes_corpus(server):
     assert row["confirmed"] is True and row["owner"] == "sec"
 
 
+def test_blame_endpoint_returns_a_verdict(server):
+    addr, _ = server
+    status, d = _req(addr, "GET", "/api/blame?id=auth-before-write")   # repo defaults to cfg repo
+    assert status == 200 and d["id"] == "auth-before-write" and "text" in d
+
+
+def test_blame_endpoint_requires_id(server):
+    addr, _ = server
+    status, d = _req(addr, "GET", "/api/blame")
+    assert status == 400 and "id" in d["error"]
+
+
 def test_confirm_requires_configured_corpus(repo):
     """With no corpus configured, confirming is refused (never writes a client-chosen path)."""
     cfg = {"repo": repo, "invariants": "", "token": "", "allowed": [], "base_path": "", "preload": {}}

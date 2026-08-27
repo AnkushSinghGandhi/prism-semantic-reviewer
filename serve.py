@@ -139,6 +139,19 @@ def make_handler(cfg):
                                             "confirmed_ids": confirmed_ids,
                                             "corpus": cfg["invariants"],
                                             "can_confirm": bool(cfg["invariants"])})
+                if path == "/api/blame":
+                    repo = g("repo") or cfg["repo"]
+                    if not repo:
+                        return self._json(400, {"error": "no repo given"})
+                    if not self._repo_ok(repo):
+                        return self._json(403, {"error": "repo not in allowlist"})
+                    inv_id = g("id")
+                    if not inv_id:
+                        return self._json(400, {"error": "no invariant id (?id=…)"})
+                    result = inv_mod.blame_invariant(ensure_local(repo), inv_id, route=g("route"),
+                                                     n=int(g("snapshots", "8")), exact=g("exact") == "1")
+                    return self._json(200, {"repo": repo, "id": inv_id, "result": result,
+                                            "text": inv_mod.render_blame(result, inv_id, g("route"))})
                 return self._json(404, {"error": "not found"})
             except Exception as e:
                 traceback.print_exc()
