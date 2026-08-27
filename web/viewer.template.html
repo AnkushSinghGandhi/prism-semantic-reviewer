@@ -88,11 +88,19 @@ document.getElementById("tally").innerHTML =
   ["🔴","🟠","🟡","🟢"].filter(s=>counts[s]).map(s=>`<span><b>${s} ${counts[s]}</b></span>`).join("")
   + `<span style="color:var(--mut)">${DATA.changes.length} semantic changes</span>`;
 
+// intent-vs-behavior panel (feature #4) — declared intent vs. the facts, above the invariants
+const contra = DATA.contradictions||[];
+if(contra.length){
+  document.getElementById("invwrap").innerHTML +=
+    `<div class="inv"><h2>🎭 Intent vs. behavior — PR describes itself as “${esc(contra[0].claim)}”, but the facts disagree</h2>`+
+    contra.map(c=>`<div class="row"><div class="stmt">${c.sev} ${esc(c.why).replace(/\x60/g,"")}</div></div>`).join("")
+    + `</div>`;
+}
+
 // invariants panel
 const alerts = (DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
 if(alerts.length){
-  const w = document.getElementById("invwrap");
-  w.innerHTML = `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
+  document.getElementById("invwrap").innerHTML += `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
     alerts.map(f=>`<div class="row"><div class="stmt">${f.sev} ${f.kind} — ${esc(f.stmt)}</div>`+
       (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
       (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")

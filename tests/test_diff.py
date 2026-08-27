@@ -2,7 +2,8 @@
 analyzed 'head' endpoints — that exercises the real diff() code path without a second fixture."""
 from conftest import BLOG
 from extractor import analyze_repo
-from diff_pr import diff, parse_changed_lines, build_review, build_sarif, intent_summary
+from diff_pr import (diff, parse_changed_lines, build_review, build_sarif, intent_summary,
+                     parse_intent, intent_contradictions)
 
 
 def test_new_unauth_write_endpoint_is_critical():
@@ -92,6 +93,60 @@ def test_intent_summary_reports_invariant_events():
                 {"kind": "WEAKENING", "sev": "🔴", "stmt": "y"}]
     s = intent_summary(diff(base, head), findings)
     assert "introduces 1 invariant violation" in s and "weakens 1 invariant" in s
+
+
+def test_parse_intent_reads_phrases_and_conventional_prefixes():
+    assert "refactor" in parse_intent("Refactor payment handler")
+    assert "refactor" in parse_intent("cleanup: no behavior change")
+    assert "refactor" in parse_intent("style(api): reformat")           # conventional prefix
+    assert "docs-only" in parse_intent("docs: update README")
+    assert "docs-only" in parse_intent("Documentation only tweak")
+    assert "bugfix" in parse_intent("fix(auth): off-by-one")
+    assert parse_intent("Add Stripe checkout endpoint") == set()        # no claim → no contract
+
+
+def test_intent_contradiction_refactor_but_new_endpoint():
+    """A PR that says 'refactor' but adds a new (unauth write) endpoint is a 🔴 contradiction,
+    derived from facts — pointing at the endpoint's file:line."""
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]      # open-write is "new"
+    changes = diff(base, head)
+    cons = intent_contradictions("refactor: tidy up the blog views", changes, [])
+    assert cons and all(c["claim"] == "refactor / no behavior change" for c in cons)
+    assert any("open-write" in c["route"] and c["sev"] == "🔴" for c in cons)
+    assert all(":" in c["loc"] for c in cons if c["route"])      # each points at a file:line
+
+
+def test_intent_contradiction_docs_only_flags_any_change():
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]
+    cons = intent_contradictions("docs only: fix typos", diff(base, head), [])
+    assert cons and cons[0]["claim"] == "docs-only" and cons[0]["sev"] == "🔴"
+
+
+def test_intent_contradiction_refactor_is_clean_when_behavior_unchanged():
+    """No declared-vs-observed conflict when a 'refactor' PR really changed nothing behavioral."""
+    head = analyze_repo(BLOG)
+    assert intent_contradictions("refactor: rename things", diff(head, head), []) == []
+
+
+def test_intent_contradiction_absent_without_a_claim():
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]
+    assert intent_contradictions("Add open-write endpoint", diff(base, head), []) == []
+
+
+def test_intent_contradiction_flows_into_review_and_sarif():
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]
+    changes = diff(base, head)
+    cons = intent_contradictions("refactor: no behavior change", changes, [])
+    meta = dict(title="refactor: no behavior change", base="b", head="h", shortstat="",
+                inv_section="", contradictions=cons)
+    review = build_review(changes, [], meta, changed={})
+    assert review["contradictions"] == cons
+    ids = {r["ruleId"] for r in build_sarif(review)["runs"][0]["results"]}
+    assert "prism/intent-contradiction" in ids
 
 
 def test_sarif_is_valid_2_1_0_and_maps_severity():

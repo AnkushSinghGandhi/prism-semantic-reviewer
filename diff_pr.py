@@ -284,12 +284,120 @@ def intent_summary(changes, findings):
     return "This PR " + _english_join(segments) + "."
 
 
+# ---- Intent vs. behavior (feature #4) -------------------------------------------------------
+# The PR title/description is a *declared* intent — a contract the author wrote. Prism already
+# knows what the code does. Cross-check the two and flag disagreements. Competitors fake this by
+# asking an LLM to eyeball the diff; every contradiction below is derived from a verified fact
+# that traces to a `file:line`, so it can't be hallucinated. (#3 is the neutral summary; #4 is
+# the contradiction.)
+_INTENT_PHRASES = {
+    "refactor": ("refactor", "no behavior change", "no behaviour change",
+                 "no functional change", "no logic change"),
+    "docs-only": ("docs only", "docs-only", "documentation only", "doc only"),
+    "bugfix": ("bugfix", "bug fix", "hotfix"),
+}
+# conventional-commit prefixes (e.g. "refactor(auth): …") mapped to the same claim tags
+_INTENT_PREFIXES = {"refactor": ("refactor", "style"), "docs-only": ("docs",),
+                    "bugfix": ("fix", "hotfix", "bugfix")}
+
+
+def parse_intent(text):
+    """Declared-intent claims parsed from a PR title/description → a set of tags
+    (`refactor` / `docs-only` / `bugfix`). Conservative on purpose: only unambiguous phrases or
+    conventional-commit prefixes count, so a flagged contradiction is real, not a keyword accident."""
+    t = (text or "").lower()
+    head = t.split("\n", 1)[0].strip()          # a conventional-commit prefix lives on line 1
+    if head.startswith("pr #") and ":" in head:  # strip our "PR #123:" display decoration first
+        head = head.split(":", 1)[1].strip()
+    claims = set()
+    for tag, phrases in _INTENT_PHRASES.items():
+        if any(p in t for p in phrases):
+            claims.add(tag)
+    for tag, prefixes in _INTENT_PREFIXES.items():
+        if any(head.startswith(p + sep) for p in prefixes for sep in (":", "(", "!")):
+            claims.add(tag)
+    return claims
+
+
+def _behavior_evidence(changes, findings, include_refactor):
+    """(label, route, loc) for every fact that constitutes a behavioral change — the evidence a
+    'nothing really changed' claim contradicts. A pure handler rename (kind REFACTOR) is behavior-
+    preserving, so it counts only for a `docs-only` claim (include_refactor=True), not `refactor`."""
+    kind_label = {"NEW ENDPOINT": "adds an endpoint", "REMOVED ENDPOINT": "removes an endpoint",
+                  "REFACTOR": "renames a handler"}
+    ev = []
+    for c in changes:
+        if c["kind"] == "REFACTOR" and not include_refactor:
+            continue
+        label = kind_label.get(c["kind"]) or c["why"]      # CHANGED → its spelled-out sub-changes
+        ev.append((label, c["route"], f"{c['ep'].file}:{c['ep'].line}"))
+    for f in (findings or []):
+        if f["kind"] == "NEW VIOLATION":
+            ev.append((f"introduces an invariant violation ({f['stmt']})", "", ""))
+        elif f["kind"] == "WEAKENING":
+            ev.append((f"weakens an invariant ({f['stmt']})", "", ""))
+    return ev
+
+
+def _where(route, loc):
+    if route and loc:
+        return f" — `{route}` @ `{loc}`"
+    return f" — `{route or loc}`" if (route or loc) else ""
+
+
+def intent_contradictions(title, changes, findings=None, body=""):
+    """Flag where the PR's declared intent (title/description) disagrees with Prism's own facts.
+    Returns finding dicts (`sev`/`claim`/`why`/`route`/`loc`) — a finding type competitors fake
+    with an LLM, produced here from structured facts. Empty when no claim is declared, or the
+    facts are consistent with it."""
+    claims = parse_intent((title or "") + "\n" + (body or ""))
+    if not claims:
+        return []
+    # docs-only is the strongest claim (no code at all): any change, even a rename, contradicts it.
+    if "docs-only" in claims:
+        ev = _behavior_evidence(changes, findings, include_refactor=True)
+        return [dict(sev=CRIT, claim="docs-only", route=r, loc=l,
+                     why=f"claims docs-only, but {lab}{_where(r, l)}") for lab, r, l in ev]
+    if "refactor" in claims:
+        ev = _behavior_evidence(changes, findings, include_refactor=False)
+        return [dict(sev=CRIT, claim="refactor / no behavior change", route=r, loc=l,
+                     why=f"claims refactor / no behavior change, but {lab}{_where(r, l)}")
+                for lab, r, l in ev]
+    if "bugfix" in claims:                      # softer: a bugfix that grows the API surface
+        out = []
+        for c in changes:
+            if c["kind"] == "NEW ENDPOINT":
+                loc = f"{c['ep'].file}:{c['ep'].line}"
+                out.append(dict(sev=HIGH, claim="bugfix", route=c["route"], loc=loc,
+                                why=f"claims bugfix, but adds an endpoint{_where(c['route'], loc)} "
+                                    "(scope creep?)"))
+        return out
+    return []
+
+
+def render_intent_section(contradictions):
+    """Markdown block — declared intent vs. observed behavior. Sits beside the invariant panel."""
+    if not contradictions:
+        return ""
+    claim = contradictions[0]["claim"]
+    L = ["## 🎭 Intent vs. behavior",
+         f"**The PR describes itself as _{claim}_, but the facts disagree** — "
+         f"{_plural(len(contradictions), 'contradiction')}:\n"]
+    for c in contradictions:
+        L.append(f"- {c['sev']} {c['why']}")
+    L.append("\n_Declared intent = the PR title/description; each line is derived from Prism's own "
+             "facts (traceable to `file:line`), not an LLM reading the diff._\n")
+    return "\n".join(L)
+
+
 def render(changes, meta):
     L = []
     L.append(f"# Semantic Review — {meta['title']}")
     L.append(f"\n`{meta['base']}` → `{meta['head']}`  |  line diff: {meta['shortstat']}\n")
     if meta.get("summary"):
         L.append(f"> **{meta['summary']}**\n")
+    if meta.get("intent_section"):
+        L.append(meta["intent_section"])
     if meta.get("inv_section"):
         L.append(meta["inv_section"])
     buckets = {CRIT: [], HIGH: [], MED: [], LOW: []}
@@ -407,7 +515,7 @@ def build_review(changes, findings, meta, changed=None):
                 "investigate": investigate, "unknowns": unknowns(ep), "graph": graph}
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
             "shortstat": meta["shortstat"], "summary": meta.get("summary", ""),
-            "invariants": findings or [],
+            "invariants": findings or [], "contradictions": meta.get("contradictions", []),
             "changed_lines": changed or {}, "changes": [cd(c) for c in changes]}
 
 
@@ -504,6 +612,14 @@ def build_sarif(review):
             emit(rid, sev, f"{stmt} — {f.get('detail', '')}", None, None, False,
                  f"{f['kind']}::{stmt}")
 
+    for c in review.get("contradictions", []):  # intent-vs-behavior (feature #4)
+        rid = "prism/intent-contradiction"
+        rule(rid, "Prism intent-vs-behavior contradiction")
+        p, ln = _split_where(c.get("loc", ""))
+        in_diff = bool(p and ln is not None and ln in changed.get(p, ()))
+        emit(rid, c.get("sev", HIGH), c.get("why", "intent contradiction"),
+             p, ln, in_diff, f"intent::{c.get('claim', '')}::{c.get('loc', '')}")
+
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
@@ -564,7 +680,7 @@ def resolve_github_pr(url, local, n):
     # Fetch only the commits needed for this PR into local refs so git archive can find them.
     fetch_ref("base", "refs/prism/base", base_sha, data["base"]["ref"])
     fetch_ref("head", "refs/prism/head", f"pull/{n}/head", head_sha)
-    return base_sha, head_sha, f"PR #{n}: {data.get('title', '')}"
+    return base_sha, head_sha, f"PR #{n}: {data.get('title', '')}", data.get("body") or ""
 
 
 def resolve_refs(repo, merge=None, base=None, head=None):
@@ -653,9 +769,9 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
     """
     url = repo
     repo = ensure_local(repo, update=not pr)
-    title = None
+    title, body = None, ""                            # body: PR description (GitHub PRs only)
     if pr:
-        base, head, title = resolve_github_pr(url, repo, pr)
+        base, head, title, body = resolve_github_pr(url, repo, pr)
         merge = None
     elif commit:
         base, head, merge = f"{commit}^", commit, None
@@ -677,7 +793,9 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
         inv_section = enforce_mod.render_section(findings)
     changes = diff(base_eps, head_eps)
     changed = changed_lines(repo, b, h)              # head-side lines a PR comment can anchor to
+    contradictions = intent_contradictions(title, changes, findings, body=body)
     meta = dict(title=title, base=b, head=h, shortstat=shortstat, inv_section=inv_section,
+                intent_section=render_intent_section(contradictions), contradictions=contradictions,
                 summary=intent_summary(changes, findings))
     return dict(review=build_review(changes, findings, meta, changed), report=render(changes, meta),
                 findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps))
