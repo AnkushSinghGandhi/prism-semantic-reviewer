@@ -20,7 +20,8 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extractor import analyze_repo             # noqa: E402
-from gitutil import sh, export, ensure_local   # noqa: E402
+from gitutil import (sh, export, ensure_local, git_toplevel,   # noqa: E402
+                     current_branch, default_branch)
 import enforce as enforce_mod                  # noqa: E402
 
 CRIT, HIGH, MED, LOW = "🔴", "🟠", "🟡", "🟢"
@@ -769,7 +770,16 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
     """
     url = repo
     repo = ensure_local(repo, update=not pr)
-    title, body = None, ""                            # body: PR description (GitHub PRs only)
+    title, body, auto = None, "", None                # body: PR description (GitHub PRs only)
+    if not (pr or commit or merge or base or head):   # no target → current branch vs. default
+        head, base = current_branch(repo), default_branch(repo)
+        if not head or not base:
+            raise RuntimeError("no target given and could not auto-detect current vs. default "
+                               "branch — pass --base/--head, --pr, --commit, or --merge")
+        if base.split("/")[-1] == head:
+            raise RuntimeError(f"you are on the default branch ({head}) — check out a feature "
+                               "branch or pass --base/--head explicitly")
+        auto = (base, head)
     if pr:
         base, head, title, body = resolve_github_pr(url, repo, pr)
         merge = None
@@ -798,7 +808,8 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
                 intent_section=render_intent_section(contradictions), contradictions=contradictions,
                 summary=intent_summary(changes, findings))
     return dict(review=build_review(changes, findings, meta, changed), report=render(changes, meta),
-                findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps))
+                findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps),
+                auto_target=auto)
 
 
 def write_html(review, path):
@@ -811,7 +822,9 @@ def write_html(review, path):
 def main():
     ap = argparse.ArgumentParser(
         description="Semantic review of a PR. `repo` may be a local path or a git URL.")
-    ap.add_argument("repo", help="local path OR git URL (https://github.com/owner/repo)")
+    ap.add_argument("repo", nargs="?",
+                    help="local path OR git URL (default: the git repo of the current directory; "
+                         "with no target flags, reviews the current branch vs. the default branch)")
     ap.add_argument("--merge", help="review a merge commit (base=^1, head=^2)")
     ap.add_argument("--base")
     ap.add_argument("--head")
@@ -826,9 +839,19 @@ def main():
                     help="exit non-zero on 🔴 invariant violations (violation) or any 🔴 (crit)")
     args = ap.parse_args()
 
-    res = run_review(args.repo, base=args.base, head=args.head, merge=args.merge,
-                     pr=args.pr, commit=args.commit, invariants_path=args.invariants)
+    repo = args.repo or git_toplevel(os.getcwd())
+    if not repo:
+        ap.error("no repo given and the current directory is not a git repo — "
+                 "pass a local path or a git URL")
+    try:
+        res = run_review(repo, base=args.base, head=args.head, merge=args.merge,
+                         pr=args.pr, commit=args.commit, invariants_path=args.invariants)
+    except RuntimeError as e:
+        sys.exit(f"prism: {e}")
     review, report, findings, changes = res["review"], res["report"], res["findings"], res["changes"]
+    if res.get("auto_target"):
+        b, h = res["auto_target"]
+        print(f"[auto-detected target: current branch vs. default — {h} vs. {b}]\n")
     open(args.out, "w").write(report)
     print(report)
 

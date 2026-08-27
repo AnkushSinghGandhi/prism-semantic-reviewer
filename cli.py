@@ -21,9 +21,7 @@ def main():
 
     if command == "review":
         import diff_pr
-        # If no arguments provided, trigger diff_pr's help
-        if len(sys.argv) == 1:
-            sys.argv.append("--help")
+        # No args → review the current repo's branch vs. its default branch (diff_pr resolves it).
         diff_pr.main()
     elif command == "serve":
         import serve
