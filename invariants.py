@@ -107,7 +107,7 @@ def eval_auth_by_group(eps):
 
 def eval_pii_egress(eps):
     # "endpoints that read PII + have an egress path require auth"
-    subjects = [e for e in eps if e.e6_pii.status in {"⚠", "?"} and e.e6_pii.items]
+    subjects = [e for e in eps if e.e6_pii.status in {"✓", "⚠", "?"} and e.e6_pii.items]
     ok = [e for e in subjects if authed(e)]
     exc = [(e.route, auth_label(e), f"{e.file}:{e.line}") for e in subjects if not authed(e)]
     return {"pii-egress-authed": (len(subjects), len(ok), exc)}

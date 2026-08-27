@@ -176,7 +176,7 @@ def diff(base_eps, head_eps):
     for route, ep in head.items():
         if route not in base:
             resolved = ep.e1_route_handler.status == "✓"
-            pii = bool(ep.e6_pii.items) and ep.e6_pii.status in {"⚠", "?"}
+            pii = bool(ep.e6_pii.items) and ep.e6_pii.status in {"✓", "⚠", "?"}
             writes = any(":write" in t for t in items(ep, "e3_db_tables"))
             ext = bool(items(ep, "e4_external"))
             money = any(k in route for k in ("payment", "order", "recharge", "invoice", "coupon"))
@@ -468,7 +468,7 @@ def build_graph(ep):
     rid, hid = f"route:{ep.route}", f"handler:{ep.handler}"
     add(rid, ep.route, "route")
     add(hid, ep.handler, "handler", loc=f"{ep.file}:{ep.line}", auth=auth_str(ep),
-        pii=bool(ep.e6_pii.items) and ep.e6_pii.status in {"⚠", "?"})
+        pii=bool(ep.e6_pii.items) and ep.e6_pii.status in {"✓", "⚠", "?"})
     edges.append({"from": rid, "to": hid, "kind": ",".join(ep.methods) or "route"})
 
     def leaf(items, ntype, kind_of):
