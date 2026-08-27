@@ -27,6 +27,10 @@ inputs:
     description: 'Apply one prism:* triage label for the PR top severity (true/false; needs issues: write)'
     required: false
     default: 'true'
+  scan_deps:
+    description: 'Scan bumped dependencies for new capabilities via PyPI (true/false; off = ⚠ unresolved, no network)'
+    required: false
+    default: 'true'
 outputs:
   review_markdown:
     description: 'Path to the generated markdown review'
@@ -50,6 +54,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        PRISM_SCAN_DEPS: ${{ inputs.scan_deps == 'false' && '0' || '1' }}
       run: |
         CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md --json pr_review.json --sarif pr_review.sarif"
         if [ -n "${{ inputs.invariants }}" ]; then CMD="$CMD --invariants ${{ inputs.invariants }}"; fi
