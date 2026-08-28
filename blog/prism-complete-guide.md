@@ -483,6 +483,15 @@ The compounding asset. Four steps:
         - api/users/export — open (AllowAny) (shop/views.py:40)
    ```
 
+**Bootstrap (turn it on everywhere, no human):** confirming rules per repo doesn't scale to 20
+repos. `prism invariants <repo> --bootstrap --baseline org-baseline.json` discovers the rules,
+auto-confirms the safe ones, and **freezes today's state as the baseline** — so the rule file is a
+*ratchet*: it only fires on a **new** violation a PR introduces, never on existing debt. Seed it
+with a shared org baseline (the universal rules) and every repo inherits the same policy; each
+repo's own exceptions are filled in automatically. Auto-confirmed rules are tagged
+`owner: auto-bootstrap` so a human can review them later. This is what makes the moat adoptable
+across a whole org instead of one repo at a time.
+
 ### Feature #2 — SARIF output
 
 `--sarif pr_review.sarif` writes a standard file GitHub understands. Upload it and your findings show
@@ -637,6 +646,7 @@ prism serve --repo . --invariants rules.json   # + enable Confirm buttons
 prism invariants .                             # discover candidate rules
 prism invariants --confirm                     # confirm interactively
 prism invariants --confirm --id auth-before-write --owner security
+prism invariants . --bootstrap --baseline org-baseline.json   # auto-confirm + ratchet (no human)
 prism invariants . --blame auth-before-write --exact   # who broke it
 
 # digest (org-wide roll-up for leadership)

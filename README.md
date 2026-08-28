@@ -143,6 +143,14 @@ was almost certainly on purpose). Writes `invariants_report.md` (readable) and
 `invariants.discovered.json` (a corpus with each rule, its history, and current exceptions). Set
 `"confirmed": true` on the ones you want, then pass that file to `prism review --invariants`.
 
+**Turn the moat on across many repos without hand-confirming each** —
+`prism invariants <repo> --bootstrap --baseline org-baseline.json` auto-confirms the safe rules and
+**freezes today's state as a baseline** (a ratchet — only *new* violations fire, existing debt is
+grandfathered). Seed it with a shared org baseline (see
+[`org-baseline.sample.json`](org-baseline.sample.json)) so every repo inherits the same universal
+rules; each repo's own exceptions are filled in automatically. Auto-confirmed rules are tagged
+`owner: auto-bootstrap` for later human review.
+
 > Example finding: **"Authenticated access before any DB write"** held at 100% for most of the
 > project's history, then dropped to 80% — here are the 4 endpoints that broke it, with locations.
 

@@ -321,6 +321,51 @@ def run_confirm(in_path, corpus_path, *, ids=None, confirm_all=False, owner=None
     return merged, newly
 
 
+# ---- bootstrap (moat at scale: a confirmed, ratcheted corpus with no human in the loop) --------
+
+# Discovered kinds safe to auto-confirm as *extras* (beyond the org baseline): a persistent
+# universal or a boundary. A shaky near-miss is left for a human — a wrong auto-rule becomes a
+# false alarm later, and false alarms kill trust faster than a missing rule does.
+HIGH_CONFIDENCE_KINDS = {"universal", "boundary"}
+
+
+def bootstrap_corpus(discovered, baseline=None, include_extras=True):
+    """A confirmed, *ratcheted* corpus for one repo — no human in the loop.
+
+    `discovered`: this repo's candidates as corpus dicts (from `corpus(discover(...)[1])`), each
+      carrying today's `observed` state and `baseline_exceptions`.
+    `baseline`:   the org's universal rule definitions (the same `id` in every repo). Each is
+      enforced everywhere; this repo's *current* exceptions/observed are filled in from discovery so
+      the rule guards forward from today — a violation a future PR introduces fires, existing debt
+      is grandfathered.
+
+    Also auto-confirms any high-confidence discovered rule (universal/boundary) not already in the
+    baseline, tagged `owner="auto-bootstrap"` so a human can tell it from a reviewed rule. Every
+    entry returned is `confirmed=True`. Pure — no IO."""
+    baseline = baseline or []
+    disc_by_id = {c["id"]: c for c in discovered}
+    baseline_ids = {b["id"] for b in baseline}
+    out = []
+    for b in baseline:                              # org rules, filled with this repo's state
+        rule = dict(b)
+        rule["confirmed"] = True
+        rule.setdefault("owner", "org-baseline")
+        d = disc_by_id.get(b["id"])
+        if d:                                       # freeze today's exceptions/observed → ratchet
+            rule["baseline_exceptions"] = d.get("baseline_exceptions", [])
+            if d.get("observed"):
+                rule["observed"] = d["observed"]
+        else:
+            rule.setdefault("baseline_exceptions", [])
+        out.append(rule)
+    if include_extras:                              # safe locally-discovered rules not in the baseline
+        for d in discovered:
+            if d["id"] in baseline_ids or d.get("kind") not in HIGH_CONFIDENCE_KINDS:
+                continue
+            out.append(confirm_candidate(d, owner="auto-bootstrap", keep_baseline=True))
+    return out
+
+
 # ---- semantic blame (moat part B: which commit first broke this rule) --------------------------
 
 def _eval_one(inv_id, eps):
@@ -436,6 +481,11 @@ def main():
     ap.add_argument("--owner", help="record this owner on confirmed invariants")
     ap.add_argument("--drop-baseline", action="store_true",
                     help="treat current exceptions as bugs to fix (don't baseline them)")
+    # bootstrap mode (moat at scale)
+    ap.add_argument("--bootstrap", action="store_true",
+                    help="auto-build a confirmed, ratcheted corpus for a repo (freeze today's state)")
+    ap.add_argument("--baseline",
+                    help="org-baseline rules file to seed the bootstrap (optional)")
     # blame mode (part B)
     ap.add_argument("--blame", metavar="INVARIANT_ID",
                     help="semantic blame: find the commit where INVARIANT_ID first broke")
@@ -460,6 +510,19 @@ def main():
         result = blame_invariant(repo, args.blame, route=args.route, n=args.snapshots,
                                  exact=args.exact)
         print(render_blame(result, args.blame, args.route))
+        return
+
+    if args.bootstrap:
+        baseline = json.load(open(args.baseline, encoding="utf-8")) if args.baseline else []
+        _, cands = discover(repo, args.snapshots)
+        merged = bootstrap_corpus(corpus(cands), baseline)
+        out = args.out if args.out != ap.get_default("out") else "prism-invariants.json"
+        json.dump(merged, open(out, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
+        confirmed = sum(1 for c in merged if c.get("confirmed"))
+        frozen = sum(len(c.get("baseline_exceptions", [])) for c in merged)
+        auto = sum(1 for c in merged if c.get("owner") == "auto-bootstrap")
+        print(f"[bootstrapped {confirmed} confirmed invariant(s) — {auto} auto-discovered, "
+              f"{frozen} exception(s) frozen as baseline; wrote {out}]")
         return
 
     shas, cands = discover(repo, args.snapshots)
