@@ -74,6 +74,40 @@ def _dedupe(seq):
     return out
 
 
+# ---- blast radius (hotspot tie-breaker) ------------------------------------------------------
+# The shared state an endpoint touches — table names, external destinations, async targets. Two
+# endpoints touching the same resource are in each other's blast radius. Used only to break ties
+# *within* a severity tier, so the change more code depends on is read first — no new colors.
+
+def _resources(ep):
+    res = set()
+    for t in items(ep, "e3_db_tables"):
+        res.add("table:" + t.split(":")[0])
+    for x in items(ep, "e4_external"):
+        res.add("ext:" + x.split(" -> ", 1)[-1])
+    for a in items(ep, "e5_async"):
+        res.add("async:" + a)
+    return res
+
+
+def fanin_index(eps):
+    """resource -> set of routes that touch it, across one snapshot."""
+    idx = {}
+    for ep in eps:
+        for r in _resources(ep):
+            idx.setdefault(r, set()).add(ep.route)
+    return idx
+
+
+def blast_radius(ep, idx):
+    """How many *other* routes share a resource with `ep` — its fan-in / blast radius."""
+    reached = set()
+    for r in _resources(ep):
+        reached |= idx.get(r, set())
+    reached.discard(ep.route)
+    return len(reached)
+
+
 def parse_changed_lines(diff_text):
     """Right-side (head) line numbers present in a unified diff, keyed by file path.
 
@@ -241,8 +275,13 @@ def diff(base_eps, head_eps):
                                 why=f"handler renamed {b.handler} → {h.handler}, semantics unchanged",
                                 detail="(refactor-stable: no semantic diff)"))
 
+    head_fan, base_fan = fanin_index(head_eps), fanin_index(base_eps)
+    for c in changes:
+        idx = base_fan if c["kind"] == "REMOVED ENDPOINT" else head_fan
+        c["blast"] = blast_radius(c["ep"], idx)
     order = {CRIT: 0, HIGH: 1, MED: 2, LOW: 3}
-    changes.sort(key=lambda c: order[c["sev"]])
+    # severity first (colors unchanged); within a tier, the change more code depends on floats up
+    changes.sort(key=lambda c: (order[c["sev"]], -c["blast"]))
     return changes
 
 
@@ -483,6 +522,8 @@ def render(changes, meta):
         if c.get("detail"):
             L.append(f"- {c['detail']}")
         L.append(f"- **flow:** {flow(ep)}")
+        if c.get("blast"):
+            L.append(f"- **blast radius:** shares data/services with {c['blast']} other endpoint(s)")
         L.append(f"- **investigate:**")
         L.append(f"    - `{ep.file}:{ep.line}` — handler `{ep.handler}` ({','.join(ep.methods) or '?'})")
         for loc in _dedupe(c.get("locs") or []):
@@ -578,6 +619,7 @@ def build_review(changes, findings, meta, changed=None):
             graph = _state_all(build_graph(ep), "added")   # NEW ENDPOINT → all new
         return {"sev": c["sev"], "kind": c["kind"], "route": c["route"], "why": c["why"],
                 "detail": c.get("detail", ""), "auth": auth_str(ep), "flow": flow(ep),
+                "blast": c.get("blast", 0),
                 "investigate": investigate, "unknowns": unknowns(ep), "graph": graph}
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
             "shortstat": meta["shortstat"], "summary": meta.get("summary", ""),
