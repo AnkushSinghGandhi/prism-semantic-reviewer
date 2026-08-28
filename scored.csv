@@ -1,2 +1,0 @@
-route,handler,methods,E1,E2,E3,E4,E5,E6
-"api/v2/companions/payment/create-order","CompanionCreateOrder","POST","✓","✓","⚠","⚠","⚠","⚠"
