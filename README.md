@@ -13,6 +13,11 @@ couldn't figure out.
 **📖 New here? Read [The Complete Guide](blog/prism-complete-guide.md)** — every feature, command,
 flag, and concept explained in plain English, with screenshots.
 
+**🏢 Want it on all your repos?** The guide's
+[§10 — Set up Prism for all your repos](blog/prism-complete-guide.md#10-set-up-prism-for-all-your-repos)
+is the step-by-step playbook — one central workflow, observe mode, the moat, and gating — for a
+personal account, a team, or a whole org.
+
 **What Prism finds:** new/changed endpoints & auth · new DB writes · external calls · **PII that
 actually leaves** (traced, not guessed) · **dependency bumps that gain new powers** (network /
 subprocess / native code) · PR **descriptions that contradict the code** · rules your codebase has

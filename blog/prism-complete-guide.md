@@ -1,7 +1,9 @@
-# Prism — The Complete Guide (every feature, in plain English)
+# Prism: See What a Pull Request *Actually* Changes — On Every Repo You Own
 
-*A semantic PR reviewer for Python web apps. This guide explains what Prism is, every idea behind
-it, and every command, flag, button, and setting — assuming you know nothing to start with.*
+*Git shows you what **lines** changed. Prism shows you what they **mean**, where to look, and whether
+they broke a rule. It's a semantic PR reviewer for Python web apps. This guide starts from zero —
+every idea, command, and setting in plain English — then shows you how to set Prism up **once** and
+run it across **all your repos** (personal, team, or organization).*
 
 ---
 
@@ -16,9 +18,10 @@ it, and every command, flag, button, and setting — assuming you know nothing t
 7. [The CLI, command by command, flag by flag](#7-the-cli-command-by-command)
 8. [Every feature explained](#8-every-feature-explained)
 9. [The GitHub Action, input by input](#9-the-github-action-input-by-input)
-10. [A full worked example](#10-a-full-worked-example)
-11. [Honesty rules (why Prism never lies)](#11-honesty-rules)
-12. [Quick reference card](#12-quick-reference-card)
+10. [Set up Prism for all your repos (personal, team, or org)](#10-set-up-prism-for-all-your-repos)
+11. [A full worked example](#11-a-full-worked-example)
+12. [Honesty rules (why Prism never lies)](#12-honesty-rules)
+13. [Quick reference card](#13-quick-reference-card)
 
 ---
 
@@ -298,10 +301,18 @@ Useful **environment variables** for a hosted deployment:
 
 | Env var | What it does |
 |---------|--------------|
-| `PRISM_TOKEN` | Require `?token=…` on API calls — lock down a public deployment. |
+| `PORT` / `HOST` | Where to bind (hosts like Render set `PORT`; default `HOST` is `0.0.0.0`). |
+| `PRISM_TOKEN` | Require `?token=…` on API calls — **set this on any public deployment.** |
 | `PRISM_ALLOWED_REPOS` | Comma-separated allow-list; only matching repos may be reviewed. |
+| `PRISM_BASE_PATH` | Serve under a sub-path (e.g. `/prism`) behind a reverse proxy. |
 | `PRISM_DEFAULT_REPO` | The repo shown by default in the UI. |
+| `PRISM_INVARIANTS` | Default invariant corpus path to enforce in the UI. |
 | `GITHUB_TOKEN` | For private repos / to avoid GitHub rate limits. |
+
+To host one shared Prism UI: run `prism serve --no-open` behind your usual reverse proxy, set
+`PRISM_TOKEN` (so the API isn't open), and optionally `PRISM_ALLOWED_REPOS` to fence it to just your
+repos. To run Prism across *all* your repos from one place, see
+[§10 — Set up Prism for all your repos](#10-set-up-prism-for-all-your-repos).
 
 ### `prism invariants` — discover, confirm, and blame rules
 
@@ -578,7 +589,131 @@ arrive as the PR comment, inline comments, and label, and an org-wide roll-up is
 
 ---
 
-## 10. A full worked example
+## 10. Set up Prism for all your repos
+
+Section 9 put Prism on **one** repo. This section turns it on across **every repo you own** —
+personal projects, a team's services, or a whole company — from **one place**, with almost no
+per-repo work.
+
+The trick: **host the workflow once, and have every repo point at it.** Then you switch Prism on (or
+change how it behaves) by editing a single file, not twenty. It's the same steps whether you have 1
+repo or 100.
+
+### Step 1 — Put the workflow in one central repo
+
+Make a repo — call it `prism-workflows` (under your username or org) — and add the real workflow
+there **once**, as a **reusable workflow**:
+
+```yaml
+# prism-workflows/.github/workflows/prism.yml
+name: Prism
+on: { workflow_call: {} }
+permissions: { contents: read, pull-requests: write, issues: write }
+jobs:
+  prism:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: AnkushSinghGandhi/prism@v1
+        with:
+          comment: 'true'
+          fail_on: none          # observe mode — never blocks a merge (yet)
+          upload_sarif: false    # set true only if you have GitHub Advanced Security
+```
+
+Then every repo gets a tiny **3-line caller** that just points at it:
+
+```yaml
+# any-repo/.github/workflows/prism.yml
+name: Prism
+on: { pull_request: {} }
+jobs:
+  prism:
+    uses: your-name/prism-workflows/.github/workflows/prism.yml@v1
+    permissions: { contents: read, pull-requests: write, issues: write }
+```
+
+Now updating Prism *everywhere* means editing **one** file in `prism-workflows`. That's the
+"centralised" part — and it's identical for a personal account, a team, or an org.
+
+### Step 2 — Start in "observe mode" (comment, never block)
+
+Notice `fail_on: none` above. That's **observe mode**: Prism posts its review on every PR but
+**can never block a merge**. Zero risk — you and your team see the value for a week or two before it
+can ever get in the way. You turn on blocking later, once you trust it (Step 5).
+
+> Keep `issues: write` + `label: 'true'` on. Prism puts one `prism:*` label on each PR, and Step 4's
+> roll-up counts those labels — no label, no roll-up.
+
+**Adding the caller to many repos:** for a handful, paste it in by hand. For a lot, a small script
+that loops your repo list and opens the 3-line PR on each (using the `gh` CLI) does it in one go — or,
+on GitHub Enterprise, an org "required workflow" applies it automatically.
+
+### Step 3 — Turn on your rules (the moat), everywhere, automatically
+
+This is the part that makes Prism *yours*: enforcing the promises **your** code already keeps
+("always log in before writing to the DB", "personal data never leaves without auth"). Normally you'd
+discover rules, confirm each by hand, and commit a file — fine for one repo, tedious for many.
+
+`prism invariants --bootstrap` does it with **no human**:
+
+```bash
+prism invariants <repo> --bootstrap --baseline org-baseline.json --out prism-invariants.json
+```
+
+It finds the repo's rules, auto-confirms the safe ones, and **freezes today's state** as the starting
+line — so it only ever complains about a **new** violation a future PR introduces, never your existing
+code. Zero noise.
+
+Write your shared rules once in an `org-baseline.json` (start from
+[`org-baseline.sample.json`](../org-baseline.sample.json)) — the universal ones like *auth before any
+DB write* and *no new external destination for personal data* — and every repo inherits them. Commit
+each repo's `prism-invariants.json`, and the workflow enforces it from then on.
+
+### Step 4 — Get one number across all your repos (optional)
+
+Per-PR comments help whoever's on that PR. For the **big picture** — *how many risky PRs are open
+right now* — `prism digest` counts the open PRs carrying each `prism:*` label:
+
+```bash
+prism digest --org your-github-org --slack "$SLACK_WEBHOOK"
+```
+
+```
+🔴  4  security / PII / unauth write
+🟠  9  money path
+🟡 12  new DB write / external
+```
+
+No re-analysis, and **no GitHub Advanced Security needed** — it just reads the labels. Run it on a
+weekly schedule and pipe it to Slack. (This one aggregates a whole GitHub **org**; for personal repos
+the per-PR labels already give you the same signal on each PR.)
+
+### Step 5 — Start blocking merges — last, and only on the sure things
+
+Once people trust the reviews, flip the switch in your **one** central file — and only for the
+highest-confidence signal:
+
+```yaml
+      - uses: AnkushSinghGandhi/prism@v1
+        with:
+          fail_on: violation     # block only when a PR breaks a confirmed rule
+```
+
+Never block on "any 🔴" from day one — that's how a tool gets switched off. Block only on a **new rule
+violation**, once your rules are confirmed and trusted.
+
+### One security note before you go wide
+
+If other people will depend on this, **mirror the Action into your own account/org and pin a commit
+SHA** instead of pointing at a public `@v1` tag — the reusable workflow means you fix that in one
+place. And to reassure any security reviewer: Prism **never runs your code** — it reads it with
+Python's parser and analyzes clean git snapshots, so there's nothing to execute.
+
+---
+
+## 11. A full worked example
 
 Here's the exact scenario from the screenshots. A developer opens a PR titled
 **"refactor: tidy up user views."** It claims to be a harmless cleanup. In reality it:
@@ -609,7 +744,7 @@ Every single item points to a line you can click. Nothing was guessed.
 
 ---
 
-## 11. Honesty rules
+## 12. Honesty rules
 
 Prism's whole value is that you can **trust** it. So it follows strict rules:
 
@@ -623,7 +758,7 @@ Prism's whole value is that you can **trust** it. So it follows strict rules:
 
 ---
 
-## 12. Quick reference card
+## 13. Quick reference card
 
 ```bash
 # review
