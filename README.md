@@ -172,7 +172,9 @@ jobs:
 ```
 
 Inputs: `github_token` (default `${{ github.token }}`), `fail_on`, `invariants`, `comment`,
-`inline`. The Action installs `prism-semantic-reviewer` from PyPI, reviews the PR, posts a sticky
+`inline`, `label`, `scan_deps`, `upload_sarif` (set `false` on private repos without GitHub
+Advanced Security so the code-scanning upload is skipped and the check stays green). The Action
+installs `prism-semantic-reviewer` from PyPI, reviews the PR, posts a sticky
 comment, and (with `fail_on`) fails the check when the PR introduces a violation. With `inline`
 (default `true`) it also pins each finding as an inline review comment on the exact changed line —
 findings whose location isn't in the PR's diff stay in the sticky comment.

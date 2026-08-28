@@ -31,6 +31,10 @@ inputs:
     description: 'Scan bumped dependencies for new capabilities via PyPI (true/false; off = ⚠ unresolved, no network)'
     required: false
     default: 'true'
+  upload_sarif:
+    description: 'Upload SARIF to GitHub code scanning (true/false). Needs GitHub Advanced Security on private repos; set false without it so the step does not fail and the check stays green.'
+    required: false
+    default: 'true'
 outputs:
   review_markdown:
     description: 'Path to the generated markdown review'
@@ -62,8 +66,9 @@ runs:
         echo "$CMD"; eval "$CMD"
 
     - name: Upload SARIF to code scanning
-      # Needs `permissions: security-events: write` in the calling workflow.
-      if: ${{ always() && hashFiles('pr_review.sarif') != '' }}
+      # Needs `permissions: security-events: write` + GitHub Advanced Security (private repos).
+      # Set `upload_sarif: false` without GHAS so this step is skipped and the check stays green.
+      if: ${{ always() && inputs.upload_sarif == 'true' && hashFiles('pr_review.sarif') != '' }}
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: pr_review.sarif
