@@ -125,6 +125,7 @@ Commands:
   post       Post a review to a PR (sticky comment, inline comments, label)
   serve      Start the Prism web UI
   invariants Discover baseline invariants from a repository's history
+  digest     Org-wide roll-up from the labels Prism applies to PRs
 ```
 
 ---
@@ -350,6 +351,39 @@ prism invariants /path/to/repo --blame auth-before-write --exact
 | `--route R` | Only blame a specific endpoint. |
 | `--exact` | **Pinpoint the precise commit** (binary-searches history; a bit slower). Without it, you get the window between two sampled snapshots. |
 
+### `prism digest` — the org-wide roll-up for leadership
+
+Every other command answers *"is **this** PR risky?"*. `digest` answers the question a manager
+actually asks: *"across **all** our repos, how much risk is sitting in review right now?"* — in one
+short message, with **no re-analysis** and **no GitHub Advanced Security**.
+
+It works by counting labels. Each PR review applies exactly one `prism:*` triage label
+([feature #6](#feature-6--auto-label)); the digest just searches an org for the **open** PRs still
+carrying each one:
+
+```bash
+prism digest --org my-org --slack "$SLACK_WEBHOOK"
+```
+
+```
+*Prism digest — my-org*  (open PRs by risk)
+🔴  4  security / PII / unauth write
+🟠  9  money path
+🟡 12  new DB write / external
+```
+
+| Flag | What it does |
+|------|--------------|
+| `--org ORG` | The GitHub org/owner to summarize (**required**). |
+| `--repos FILE` | Optional file of `owner/repo` lines → adds an adoption line: how many repos have the workflow live and a confirmed invariants file. |
+| `--slack URL` | Post the digest to a Slack incoming webhook (otherwise it just prints). |
+
+Needs a `GITHUB_TOKEN` with **org read** access (the default per-repo token can't search the org).
+An honesty rule carries over from the analyzer: a tier it couldn't fetch shows `?`, never a
+fake `0`. Run it on a schedule (a weekly cron in a central repo) and it becomes the standing
+answer to "is Prism worth keeping on?" — because the labels feed it, keep `label: true` and
+`issues: write` on your review workflow.
+
 ---
 
 ## 8. Every feature explained
@@ -526,8 +560,12 @@ Every input:
 | `inline` | `true` | Also post inline comments on changed lines. ([#1](#feature-1--inline-pr-comments)) |
 | `label` | `true` | Apply one `prism:*` label. ([#6](#feature-6--auto-label)) |
 | `scan_deps` | `true` | Scan bumped dependencies against PyPI. Set `false` to skip the network (findings become ⚠). ([#5](#feature-5--dependency-capability-delta)) |
+| `upload_sarif` | `true` | Upload SARIF to code scanning. Set `false` on private repos **without** GitHub Advanced Security so the step is skipped and the check stays green. |
 
-The Action also uploads SARIF automatically, so findings appear in the Security tab.
+The Action uploads SARIF (when `upload_sarif` is on), so findings appear in the Security tab —
+that surface needs GitHub Advanced Security on private repos. Without GHAS, the same findings still
+arrive as the PR comment, inline comments, and label, and an org-wide roll-up is available via
+`prism digest` (below).
 
 ---
 
@@ -600,6 +638,10 @@ prism invariants .                             # discover candidate rules
 prism invariants --confirm                     # confirm interactively
 prism invariants --confirm --id auth-before-write --owner security
 prism invariants . --blame auth-before-write --exact   # who broke it
+
+# digest (org-wide roll-up for leadership)
+prism digest --org my-org                       # open PRs by prism:* label
+prism digest --org my-org --repos repos.txt --slack "$SLACK_WEBHOOK"  # + adoption, to Slack
 
 # env vars
 PRISM_SCAN_DEPS=0     # skip the dependency network scan

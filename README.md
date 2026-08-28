@@ -38,7 +38,7 @@ commands as `prism review` / `prism serve` / `prism invariants`.
 
 ## Commands
 
-Prism has four commands:
+Prism has five commands:
 
 | Command | What it does |
 |---------|--------------|
@@ -46,6 +46,7 @@ Prism has four commands:
 | `prism post` | post a review to a GitHub PR: sticky comment, inline comments, triage label |
 | `prism serve`  | the interactive web UI (graph view), auto-selects your current repo |
 | `prism invariants` | learn, **confirm**, enforce, and **blame** the rules your codebase follows |
+| `prism digest` | org-wide roll-up: open PRs by `prism:*` label across every repo (for leadership) |
 
 Run `prism review` with **no arguments** inside a repo to review the current branch vs. the default
 branch. Full flag-by-flag reference: **[the Complete Guide](blog/prism-complete-guide.md)**.
@@ -145,6 +146,26 @@ was almost certainly on purpose). Writes `invariants_report.md` (readable) and
 > Example finding: **"Authenticated access before any DB write"** held at 100% for most of the
 > project's history, then dropped to 80% — here are the 4 endpoints that broke it, with locations.
 
+### `prism digest` — org-wide roll-up for leadership
+
+```bash
+prism digest --org my-org --slack "$SLACK_WEBHOOK"
+```
+
+Turns per-PR reviews into one number a leader can read. It counts the **open** PRs across a whole
+org that still carry each `prism:*` triage label — no re-analysis, and **no GitHub Advanced
+Security** needed (it reads labels Prism already applied):
+
+```
+🔴  4  security / PII / unauth write
+🟠  9  money path
+🟡 12  new DB write / external
+```
+
+A tier it couldn't fetch shows `?`, never a fake `0`. Needs a `GITHUB_TOKEN` with org read
+access. Add `--repos repos.txt` (one `owner/repo` per line) for an adoption line — how many repos
+have the workflow live and a confirmed invariants file. Run it on a schedule and pipe it to Slack.
+
 ---
 
 ## GitHub Action
@@ -241,7 +262,9 @@ The product is the **gap** between what the code does and what you said it shoul
 diff_pr.py     # prism review — the semantic diff engine (+ enforce + outputs)
 serve.py       # prism serve  — the web UI / API
 invariants.py  # prism invariants — discover rules from git history
+digest.py      # prism digest — org-wide roll-up from prism:* labels (no GHAS needed)
 enforce.py     # check a PR against confirmed rules
+deps.py        # dependency capability-delta scan (bumped deps that gain new powers)
 extractor/     # reads code → facts (the 6-edge lens)
 gitutil.py     # git helpers (URL clone/cache, repo detection)
 cli.py         # the `prism` entry point

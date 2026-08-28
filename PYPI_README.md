@@ -77,6 +77,16 @@ prism invariants /path/to/repo --snapshots 10
 Ranks properties by how long they've held across history, writing `invariants_report.md` and
 `invariants.discovered.json`. Confirm the ones you want and feed them to `prism review --invariants`.
 
+### `prism digest` — org-wide roll-up for leadership
+
+```bash
+prism digest --org my-org --slack "$SLACK_WEBHOOK"
+```
+
+Counts the **open** PRs across a whole org by the `prism:*` triage label Prism already applied —
+🔴 security / 🟠 money / 🟡 new write. No re-analysis, and **no GitHub Advanced Security** needed.
+Needs a `GITHUB_TOKEN` with org read access.
+
 ## What it detects (without running your code)
 
 - **API routes** (new / modified / removed) and their **auth level** (e.g. AllowAny vs Authenticated)
