@@ -27,6 +27,6 @@ Repository = "https://github.com/AnkushSinghGandhi/prism"
 prism = "cli:main"
 
 [tool.setuptools]
-py-modules = ["cli", "diff_pr", "serve", "gitutil", "enforce", "invariants", "deps"]
+py-modules = ["cli", "diff_pr", "serve", "gitutil", "enforce", "invariants", "deps", "digest"]
 packages = ["web", "extractor", "ci"]
 package-data = { "web" = ["app.html", "viewer.template.html"] }

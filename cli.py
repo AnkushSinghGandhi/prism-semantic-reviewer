@@ -13,6 +13,7 @@ def main():
         print("  post      Post a review to a PR (sticky comment, inline comments, label)")
         print("  serve     Start the Prism web UI")
         print("  invariants Discover baseline invariants from a repository's history")
+        print("  digest    Org-wide leadership roll-up from the labels Prism applies to PRs")
         print("\nRun 'prism <command> --help' for more information on a command.")
         sys.exit(0)
 
@@ -37,6 +38,11 @@ def main():
         if len(sys.argv) == 1:
             sys.argv.append("--help")
         invariants.main()
+    elif command == "digest":
+        import digest
+        if len(sys.argv) == 1:
+            sys.argv.append("--help")
+        digest.main()
     else:
         print(f"Unknown command: {command}")
         sys.exit(1)
