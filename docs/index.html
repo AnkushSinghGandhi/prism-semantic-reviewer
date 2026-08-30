@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prism — see what a pull request actually changes</title>
+<meta name="description" content="Git tells you what lines changed. Prism tells you what they mean — and where to look. A semantic PR reviewer for Python web apps.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◭</text></svg>">
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#131823; --panel2:#0f141d; --line:#232a38;
+    --text:#e6edf3; --muted:#93a1b0; --accent:#a855f7; --accent2:#7c3aed;
+    --crit:#f85149; --high:#f0883e; --med:#e3b341; --low:#3fb950;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  .spectrum{height:4px;background:linear-gradient(90deg,#f85149,#f0883e,#e3b341,#3fb950,#58a6ff,#a855f7)}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 24px}
+  code,pre{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+  /* nav */
+  nav{position:sticky;top:0;z-index:10;background:rgba(11,14,20,.85);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:60px}
+  nav .logo{font-weight:700;font-size:20px;letter-spacing:.5px}
+  nav .logo span{color:var(--accent)}
+  nav .links a{color:var(--muted);margin-left:22px;font-size:14px}
+  nav .links a:hover{color:var(--text);text-decoration:none}
+  @media(max-width:640px){nav .links a:not(.btn){display:none}}
+
+  /* hero */
+  .hero{position:relative;text-align:center;padding:90px 0 60px;background:radial-gradient(620px 320px at 50% -40px,rgba(168,85,247,.14),transparent 70%)}
+  .hero .mark{font-size:56px}
+  .hero h1{font-size:44px;line-height:1.15;margin:18px 0 0;font-weight:800;letter-spacing:-.5px}
+  .hero h1 em{font-style:normal;background:linear-gradient(90deg,#a855f7,#58a6ff);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .hero p.sub{font-size:20px;color:var(--muted);max-width:660px;margin:20px auto 0}
+  .hero p.one{margin:14px auto 0;color:var(--text);max-width:600px}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:30px}
+  .btn{display:inline-block;padding:11px 20px;border-radius:9px;font-weight:600;font-size:15px;border:1px solid var(--line)}
+  .btn.primary{background:linear-gradient(90deg,var(--accent2),var(--accent));color:#fff;border:none}
+  .btn.primary:hover{opacity:.92;text-decoration:none}
+  .btn.ghost{color:var(--text)}
+  .btn.ghost:hover{border-color:var(--accent);text-decoration:none}
+
+  .install{display:inline-flex;align-items:center;gap:14px;margin-top:26px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;font-size:15px}
+  .install code{color:#a5d6ff}
+  .install button{background:var(--panel2);color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .install button:hover{color:var(--text)}
+
+  .hero .meta{margin-top:22px;display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap;font-size:14px;color:var(--muted)}
+  .hero .meta a{color:var(--muted)}
+  .hero .meta a:hover{color:var(--text);text-decoration:none}
+  .hero .meta .star:hover{color:#e3b341}
+  .hero .meta .sponsor{color:#db61a2}
+  .hero .meta .sponsor:hover{color:#f778ba}
+  .hero .meta .sep{opacity:.4}
+
+  /* sections */
+  section{padding:56px 0;border-top:1px solid var(--line)}
+  .eyebrow{color:var(--accent);font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase}
+  h2{font-size:30px;margin:8px 0 6px;letter-spacing:-.3px}
+  .lead{color:var(--muted);font-size:18px;max-width:720px}
+
+  .shot{margin-top:32px;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+  .shot img{display:block;width:100%}
+
+  /* terminal */
+  .term{margin-top:28px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13.5px}
+  .term .bar{background:var(--panel);padding:10px 14px;border-bottom:1px solid var(--line);color:var(--muted);font-size:12px}
+  .term .bar b{color:#f85149}.term .bar i{color:#e3b341;font-style:normal}.term .bar s{color:#3fb950;text-decoration:none}
+  .term pre{padding:18px;overflow:auto;line-height:1.7;color:#c9d1d9}
+  .c-crit{color:var(--crit)}.c-high{color:var(--high)}.c-med{color:var(--med)}.c-low{color:var(--low)}
+  .muted{color:var(--muted)}
+
+  /* grids */
+  .grid{display:grid;gap:16px;margin-top:32px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  @media(max-width:760px){.g3,.g2{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px}
+  .card h3{font-size:17px;margin-bottom:6px}
+  .card p{color:var(--muted);font-size:14.5px}
+  .card .ico{font-size:22px;margin-bottom:8px}
+
+  .lens{width:100%;border-collapse:collapse;margin-top:28px;font-size:15px}
+  .lens td{padding:12px 14px;border-bottom:1px solid var(--line)}
+  .lens td:first-child{font-weight:600;white-space:nowrap;color:var(--text)}
+  .lens td:last-child{color:var(--muted)}
+
+  .cmp{width:100%;border-collapse:collapse;margin-top:28px;font-size:14.5px;min-width:560px}
+  .cmp th,.cmp td{padding:12px 12px;border-bottom:1px solid var(--line);text-align:center}
+  .cmp th:first-child,.cmp td:first-child{text-align:left;color:var(--muted);font-weight:600}
+  .cmp thead th{color:var(--muted);font-weight:600;font-size:13px}
+  .cmp .col-prism{background:rgba(168,85,247,.10);color:var(--text)}
+  .cmp thead .col-prism{color:var(--accent);font-weight:800}
+  .cmp .y{color:var(--low);font-weight:700}.cmp .n{color:var(--crit)}.cmp .p{color:var(--med)}
+
+  .pills{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
+  .pill{border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;color:var(--muted)}
+  .pill b{color:var(--text)}
+
+  /* faq */
+  .faq{margin-top:28px}
+  .faq details{border:1px solid var(--line);border-radius:10px;padding:0 18px;margin-bottom:10px;background:var(--panel)}
+  .faq summary{cursor:pointer;padding:16px 0;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary::after{content:"+";color:var(--accent);font-size:20px;flex:none}
+  .faq details[open] summary::after{content:"–"}
+  .faq details[open] summary{border-bottom:1px solid var(--line)}
+  .faq details p{color:var(--muted);padding:14px 0 18px;font-size:15px;margin:0}
+
+  /* steps */
+  .steps{margin-top:32px;display:grid;gap:14px}
+  .step{display:flex;gap:16px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+  .step .num{flex:none;width:32px;height:32px;border-radius:50%;background:linear-gradient(90deg,var(--accent2),var(--accent));color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .step .body{flex:1;min-width:0}
+  .step h3{font-size:16px;margin-bottom:8px}
+  .step pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 14px;overflow:auto;font-size:13.5px;color:#a5d6ff}
+
+  footer{border-top:1px solid var(--line);padding:40px 0 60px;color:var(--muted);font-size:14px}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px}
+  footer a{color:var(--muted)}footer a:hover{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="spectrum"></div>
+
+<nav><div class="wrap">
+  <div class="logo">◭ <span>Prism</span></div>
+  <div class="links">
+    <a href="#how">How it works</a>
+    <a href="#lens">The lens</a>
+    <a href="#moat">The moat</a>
+    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">GitHub</a>
+  </div>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <div class="mark">◭</div>
+  <h1>See what a pull request <em>actually</em> changes</h1>
+  <p class="sub">Git tells you what <b>lines</b> changed. Prism tells you what they <b>mean</b> — and points you at the exact line to read.</p>
+  <p class="one">A semantic PR reviewer for Python web apps. It makes it impossible for an important change to hide inside a huge, AI-generated diff.</p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">Get started on GitHub</a>
+    <a class="btn ghost" href="https://pypi.org/project/prism-semantic-reviewer/">View on PyPI</a>
+    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/blog/prism-complete-guide.md">Read the guide</a>
+  </div>
+  <div class="install">
+    <code id="pip">pip install prism-semantic-reviewer</code>
+    <button onclick="navigator.clipboard.writeText(document.getElementById('pip').textContent);this.textContent='copied'">copy</button>
+  </div>
+  <div class="meta">
+    <a class="star" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">★ Star on GitHub</a>
+    <span class="sep">·</span>
+    <a class="sponsor" href="https://github.com/sponsors/AnkushSinghGandhi">♥ Sponsor</a>
+    <span class="sep">·</span>
+    <span>by Ankush Singh Gandhi</span>
+    <span class="sep">·</span>
+    <a href="https://warriorwhocodes.com">warriorwhocodes.com</a>
+  </div>
+</div></header>
+
+<!-- problem -->
+<section id="how"><div class="wrap">
+  <div class="eyebrow">The problem</div>
+  <h2>A single PR can be 60 files and 18,000 lines</h2>
+  <p class="lead">A normal line-diff buries the one change that matters — "user email now leaves the server" — under thousands of mechanical edits. You don't need to read all of it. You need to know <b>what changed</b> in behavior, <b>how it flows</b>, <b>where to look</b>, and <b>whether it broke a promise</b>.</p>
+
+  <div class="term">
+    <div class="bar">$ prism review . --pr 481 &nbsp;&nbsp;→&nbsp;&nbsp; <b>🔴 3</b> &nbsp; <i>🟠 4</i> &nbsp; <span style="color:#e3b341">🟡 4</span> &nbsp; <s>🟢 20</s></div>
+<pre><span class="muted"># 17,841 lines changed → 3 things to actually look at</span>
+
+<span class="c-crit">🔴 NEW ENDPOINT</span>  <b>/api/companions/payment</b>
+   why: new endpoint exposes a PII path with open/unspecified auth
+   flow: /api/companions/payment → CompanionPayment → {Order:write} → ext: PayTM
+   investigate: <span class="muted">payment_views.py:90</span>  <span class="muted">email → requests.post @ services.py:9</span>
+
+<span class="c-high">🟠 CHANGED</span>       <b>/api/orders/invoice</b>
+   why: new external call: razorpay.post  ·  money path
+
+<span class="c-low">🟢 REFACTOR</span>      <b>/api/users/profile</b>
+   handler renamed, semantics unchanged — nothing to see
+</pre>
+  </div>
+</div></section>
+
+<!-- screenshot -->
+<section><div class="wrap">
+  <div class="eyebrow">See it</div>
+  <h2>What changed → how it flows → where to look</h2>
+  <p class="lead">A ranked list, an interactive flow graph for every change, and the exact <code>file:line</code> locations — in the terminal, a web UI, a PR comment, or your Security tab.</p>
+  <div class="shot"><img src="images/01-review.png" alt="A finished Prism review in the web UI"></div>
+</div></section>
+
+<!-- why -->
+<section id="why"><div class="wrap">
+  <div class="eyebrow">Why Prism</div>
+  <h2>Why not just read the diff?</h2>
+  <p class="lead">Because on an 18,000-line PR you can't — and the usual alternatives either guess, or miss what actually matters.</p>
+  <div class="grid g2">
+    <div class="card"><div class="ico">🎯</div><h3>Facts, not vibes</h3><p>It reads your code with Python's own parser and reports what's there — it never runs it, and never guesses. Every finding traces to a <code>file:line</code>, so there's nothing to fact-check.</p></div>
+    <div class="card"><div class="ico">🤫</div><h3>Honest about the unknown</h3><p>A tool that wrongly says "all clear" ships the bug. Prism fails toward <i>look here</i> — ✓ / ⚠ / ? — and never renders "didn't see it" as "it's safe."</p></div>
+    <div class="card"><div class="ico">🔁</div><h3>Refactor-proof</h3><p>Facts are matched on the URL route, not class names. Rename every class in the repo and a pure refactor produces <b>zero</b> noise — so the real change stands out.</p></div>
+    <div class="card"><div class="ico">🔒</div><h3>Your rules, enforced</h3><p>It learns the promises your codebase already keeps and flags the PR that breaks one. That confirmed corpus is yours — the piece a competitor can't clone.</p></div>
+  </div>
+
+  <div style="overflow-x:auto">
+  <table class="cmp">
+    <thead><tr><th></th><th>Read the diff</th><th>AI reviewers</th><th>Static scanners</th><th class="col-prism">Prism</th></tr></thead>
+    <tbody>
+      <tr><td>Survives an 18k-line PR</td><td class="n">✗</td><td class="p">~</td><td class="p">~</td><td class="col-prism y">✓</td></tr>
+      <tr><td>No hallucinations</td><td class="y">✓</td><td class="n">✗</td><td class="y">✓</td><td class="col-prism y">✓</td></tr>
+      <tr><td>Honest about what it can't tell</td><td class="p">—</td><td class="n">✗</td><td class="p">~</td><td class="col-prism y">✓</td></tr>
+      <tr><td>Refactor-stable (renames = no noise)</td><td class="n">✗</td><td class="n">✗</td><td class="n">✗</td><td class="col-prism y">✓</td></tr>
+      <tr><td>Learns your team's own rules</td><td class="n">✗</td><td class="n">✗</td><td class="n">✗</td><td class="col-prism y">✓</td></tr>
+      <tr><td>Zero config, zero dependencies</td><td class="y">✓</td><td class="n">✗</td><td class="p">~</td><td class="col-prism y">✓</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="lead" style="font-size:14px;margin-top:14px;color:var(--muted)">It doesn't replace your tests or type-checker — it sees a different layer: <b>behavior at the endpoint</b>, and whether a change broke a promise.</p>
+</div></section>
+
+<!-- lens -->
+<section id="lens"><div class="wrap">
+  <div class="eyebrow">The lens</div>
+  <h2>Six things it reads for every endpoint</h2>
+  <p class="lead">It reads your code with Python's own parser — it never runs it — and reports <b>facts</b>, not guesses.</p>
+  <table class="lens">
+    <tr><td>route → handler</td><td>which URL maps to which view?</td></tr>
+    <tr><td>auth</td><td>does it require a login / permission?</td></tr>
+    <tr><td>db tables</td><td>which tables does it read and write?</td></tr>
+    <tr><td>external calls</td><td>does it call another service (payment, email, …)?</td></tr>
+    <tr><td>async</td><td>does it kick off a background job / thread / signal?</td></tr>
+    <tr><td>PII</td><td>does personal data travel toward something that leaves the app?</td></tr>
+  </table>
+  <div class="pills">
+    <span class="pill"><b>✓ verified</b> — saw it clearly</span>
+    <span class="pill"><b>⚠ potential</b> — one hop away / behind config</span>
+    <span class="pill"><b>? unknown</b> — couldn't tell</span>
+  </div>
+  <p class="lead" style="margin-top:18px">It will <b>never</b> say "no PII leaves here" when it just didn't see it. Absence is shown as <i>unknown</i>, never as <i>safe</i>.</p>
+</div></section>
+
+<!-- run it three ways -->
+<section><div class="wrap">
+  <div class="eyebrow">Run it your way</div>
+  <h2>Terminal, a web UI, or on every PR</h2>
+  <p class="lead">Same facts, three surfaces — pick whatever fits your workflow.</p>
+  <div class="grid g3">
+    <div class="card"><div class="ico">⌨️</div><h3>CLI</h3><p><code>prism review</code> — a ranked review right in your terminal or CI logs.</p></div>
+    <div class="card"><div class="ico">🖥️</div><h3>Web UI</h3><p><code>prism serve</code> — an interactive flow graph and where-to-look, in your browser.</p></div>
+    <div class="card"><div class="ico">🤖</div><h3>GitHub Action</h3><p>A sticky comment, inline notes, and an optional merge gate on every pull request.</p></div>
+  </div>
+  <div class="shot" style="margin-top:22px"><img src="images/00-welcome.png" alt="The Prism web UI"></div>
+</div></section>
+
+<!-- moat -->
+<section id="moat"><div class="wrap">
+  <div class="eyebrow">The moat</div>
+  <h2>It learns the rules your code already follows</h2>
+  <p class="lead">A property your codebase kept for 800 commits was almost certainly on purpose. Prism mines your git history, surfaces those rules, you confirm the real ones — and then every PR that breaks one gets flagged, with the exact commit that broke it.</p>
+  <div class="shot"><img src="images/02-invariants.png" alt="Prism invariants: discover, confirm, and blame rules"></div>
+</div></section>
+
+<!-- features -->
+<section><div class="wrap">
+  <div class="eyebrow">More</div>
+  <h2>Built to be trusted</h2>
+  <div class="grid g3">
+    <div class="card"><div class="ico">🩸</div><h3>Traced PII leaks</h3><p>The exact field → the exact line where it leaves. Traced, not guessed.</p></div>
+    <div class="card"><div class="ico">📦</div><h3>Dependency powers</h3><p>Flags a bumped package that newly gains network / subprocess / native code.</p></div>
+    <div class="card"><div class="ico">🎭</div><h3>Intent vs. behavior</h3><p>PR says "just a refactor" but added an endpoint? Caught — from facts, not an LLM.</p></div>
+    <div class="card"><div class="ico">💬</div><h3>Inline PR comments</h3><p>Each finding pinned to the exact changed line, plus a sticky summary and a triage label.</p></div>
+    <div class="card"><div class="ico">🛡️</div><h3>SARIF + gating</h3><p>Findings in the Security tab, and an optional merge gate on a broken rule.</p></div>
+    <div class="card"><div class="ico">📊</div><h3>Org roll-up</h3><p><code>prism digest</code> counts the open risky PRs across every repo — one number for leadership.</p></div>
+  </div>
+</div></section>
+
+<!-- faq -->
+<section id="faq"><div class="wrap">
+  <div class="eyebrow">Questions</div>
+  <h2>The honest answers</h2>
+  <div class="faq">
+    <details><summary>Won't it be noisy?</summary><p>No — it's a <b>diff</b>. It only speaks up about what a PR actually changed, and it labels anything uncertain "look here," never "safe." Roll it out in observe mode and you'll see the signal before it can ever block a merge.</p></details>
+    <details><summary>Does it need setup or config?</summary><p>Nothing. It's a pure-Python-standard-library package with <b>zero third-party dependencies</b>. Point it at a repo (local path or GitHub URL) and go — no config file, no server, no account.</p></details>
+    <details><summary>Will it hallucinate like an AI reviewer?</summary><p>No. There's no LLM in the analysis. It reads your code with Python's parser and reports <b>facts</b>; every finding traces to an exact <code>file:line</code>, so there's nothing to double-check.</p></details>
+    <details><summary>Does it run my code?</summary><p>Never. It reads code statically and analyzes clean git snapshots (via <code>git archive</code>) in a temp folder — it doesn't execute anything or touch your working tree. Safe to point at any repo.</p></details>
+    <details><summary>What about repos that aren't Django / DRF?</summary><p>Its lens is endpoint-centric (Django &amp; Django REST Framework today). On a repo it can't read, it simply finds nothing to report — it won't invent false alarms. More frameworks (FastAPI, …) are on the roadmap.</p></details>
+    <details><summary>Do I need GitHub Advanced Security?</summary><p>No. The review, PR comments, labels, gating, and the org roll-up all work without it. GHAS only powers the optional SARIF Security-tab dashboard.</p></details>
+    <details><summary>Is it free?</summary><p>Yes — under the <a href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/LICENSE">Elastic License 2.0</a>: free to use, self-host, and modify. You just can't resell it as a hosted service.</p></details>
+  </div>
+</div></section>
+
+<!-- get started -->
+<section id="start"><div class="wrap">
+  <div class="eyebrow">Get started in 30 seconds</div>
+  <h2>Three commands, zero setup</h2>
+  <p class="lead">Needs Python 3.8+, plus <code>git</code> and <code>tar</code>. That's the whole install.</p>
+  <div class="steps">
+    <div class="step"><div class="num">1</div><div class="body"><h3>Install it</h3><pre>pip install prism-semantic-reviewer</pre></div></div>
+    <div class="step"><div class="num">2</div><div class="body"><h3>Review a pull request</h3><pre>prism review https://github.com/owner/repo --pr 481</pre></div></div>
+    <div class="step"><div class="num">3</div><div class="body"><h3>Or explore it in your browser</h3><pre>cd your-repo &amp;&amp; prism serve</pre></div></div>
+  </div>
+  <div class="cta" style="margin-top:30px">
+    <a class="btn primary" href="https://pypi.org/project/prism-semantic-reviewer/">Install from PyPI</a>
+    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer#github-action">Add the GitHub Action</a>
+    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/blog/prism-complete-guide.md">Read the guide</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <div>◭ <b>Prism</b> — the product is the gap between what your code does and what you said it should.</div>
+  <div>
+    <a href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">GitHub</a> ·
+    <a href="https://pypi.org/project/prism-semantic-reviewer/">PyPI</a> ·
+    <a href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/blog/prism-complete-guide.md">Docs</a> ·
+    <a href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/LICENSE">Elastic License 2.0</a>
+  </div>
+</div></footer>
+
+</body>
+</html>
