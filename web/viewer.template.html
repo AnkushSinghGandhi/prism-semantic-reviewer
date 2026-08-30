@@ -16,6 +16,8 @@
   header{padding:16px 22px;border-bottom:1px solid var(--line)}
   header h1{margin:0 0 4px;font-size:17px}
   header .sub{color:var(--mut);font-size:12.5px}
+  .summary{margin-top:10px;font-size:14px;font-weight:600;line-height:1.4}
+  .summary:empty{display:none}
   .tally{margin-top:8px;display:flex;gap:14px;font-size:12.5px}
   .tally b{font-weight:600}
   .inv{margin:14px 22px 0;border:1px solid var(--crit);border-radius:8px;
@@ -61,6 +63,7 @@
 <header>
   <h1 id="title"></h1>
   <div class="sub" id="sub"></div>
+  <div class="summary" id="summary"></div>
   <div class="tally" id="tally"></div>
 </header>
 <div id="invwrap"></div>
@@ -77,6 +80,7 @@ const active = new Set(["🔴","🟠","🟡","🟢"]);
 document.getElementById("title").textContent = DATA.title;
 document.getElementById("sub").innerHTML =
   `<span class="mono">${DATA.base} → ${DATA.head}</span> &nbsp;·&nbsp; line diff: ${DATA.shortstat||"—"}`;
+if(DATA.summary){ document.getElementById("summary").textContent = DATA.summary; }
 
 const counts = {};
 DATA.changes.forEach(c=>counts[c.sev]=(counts[c.sev]||0)+1);
@@ -84,11 +88,28 @@ document.getElementById("tally").innerHTML =
   ["🔴","🟠","🟡","🟢"].filter(s=>counts[s]).map(s=>`<span><b>${s} ${counts[s]}</b></span>`).join("")
   + `<span style="color:var(--mut)">${DATA.changes.length} semantic changes</span>`;
 
+// intent-vs-behavior panel (feature #4) — declared intent vs. the facts, above the invariants
+const contra = DATA.contradictions||[];
+if(contra.length){
+  document.getElementById("invwrap").innerHTML +=
+    `<div class="inv"><h2>🎭 Intent vs. behavior — PR describes itself as “${esc(contra[0].claim)}”, but the facts disagree</h2>`+
+    contra.map(c=>`<div class="row"><div class="stmt">${c.sev} ${esc(c.why).replace(/\x60/g,"")}</div></div>`).join("")
+    + `</div>`;
+}
+
+// dependency capability panel (feature #5) — only bumps that widen or can't confirm the surface
+const deps = (DATA.dependencies||[]).filter(d=>(d.gained&&d.gained.length)||d.unresolved);
+if(deps.length){
+  document.getElementById("invwrap").innerHTML +=
+    `<div class="inv"><h2>📦 Dependency capability changes</h2>`+
+    deps.map(d=>`<div class="row"><div class="stmt">${d.unresolved?"⚠":d.sev} ${esc(d.name)} ${esc(d.old||"(new)")}→${esc(d.new)} — ${esc(d.why)}</div></div>`).join("")
+    + `</div>`;
+}
+
 // invariants panel
 const alerts = (DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
 if(alerts.length){
-  const w = document.getElementById("invwrap");
-  w.innerHTML = `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
+  document.getElementById("invwrap").innerHTML += `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
     alerts.map(f=>`<div class="row"><div class="stmt">${f.sev} ${f.kind} — ${esc(f.stmt)}</div>`+
       (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
       (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")

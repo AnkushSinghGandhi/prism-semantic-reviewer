@@ -13,6 +13,7 @@ review: what changed, how it flows, where to look, and what stayed unknown.
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import shutil
@@ -20,12 +21,32 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extractor import analyze_repo             # noqa: E402
-from gitutil import sh, export, ensure_local   # noqa: E402
+from gitutil import (sh, export, ensure_local, git_toplevel,   # noqa: E402
+                     current_branch, default_branch)
 import enforce as enforce_mod                  # noqa: E402
+import deps as deps_mod                        # noqa: E402
 
 CRIT, HIGH, MED, LOW = "🔴", "🟠", "🟡", "🟢"
 EDGES = [("e3_db_tables", "db"), ("e4_external", "external"),
          ("e5_async", "async"), ("e6_pii", "pii")]
+
+INFO_URI = "https://github.com/AnkushSinghGandhi/prism"
+# GitHub code-scanning alert level per Prism severity tier.
+SARIF_LEVEL = {CRIT: "error", HIGH: "error", MED: "warning", LOW: "note"}
+# Optional numeric on each result for the Security-tab Critical/High/Medium/Low sort.
+SARIF_SECURITY = {CRIT: "9.0", HIGH: "7.0", MED: "4.0", LOW: "2.0"}
+
+
+def _prism_version():
+    try:
+        from importlib.metadata import version, PackageNotFoundError
+        try:
+            return version("prism-semantic-reviewer")
+        except PackageNotFoundError:
+            pass
+    except Exception:
+        pass
+    return "0"
 
 
 def norm(s):
@@ -51,6 +72,40 @@ def _dedupe(seq):
             seen.add(x)
             out.append(x)
     return out
+
+
+# ---- blast radius (hotspot tie-breaker) ------------------------------------------------------
+# The shared state an endpoint touches — table names, external destinations, async targets. Two
+# endpoints touching the same resource are in each other's blast radius. Used only to break ties
+# *within* a severity tier, so the change more code depends on is read first — no new colors.
+
+def _resources(ep):
+    res = set()
+    for t in items(ep, "e3_db_tables"):
+        res.add("table:" + t.split(":")[0])
+    for x in items(ep, "e4_external"):
+        res.add("ext:" + x.split(" -> ", 1)[-1])
+    for a in items(ep, "e5_async"):
+        res.add("async:" + a)
+    return res
+
+
+def fanin_index(eps):
+    """resource -> set of routes that touch it, across one snapshot."""
+    idx = {}
+    for ep in eps:
+        for r in _resources(ep):
+            idx.setdefault(r, set()).add(ep.route)
+    return idx
+
+
+def blast_radius(ep, idx):
+    """How many *other* routes share a resource with `ep` — its fan-in / blast radius."""
+    reached = set()
+    for r in _resources(ep):
+        reached |= idx.get(r, set())
+    reached.discard(ep.route)
+    return len(reached)
 
 
 def parse_changed_lines(diff_text):
@@ -85,6 +140,26 @@ def parse_changed_lines(diff_text):
 def changed_lines(repo, base, head):
     """{file: [head-side line numbers touched]} for `base..head` (see parse_changed_lines)."""
     return parse_changed_lines(sh("git", "-C", repo, "diff", "--no-color", base, head))
+
+
+def dependency_findings(repo, base, head):
+    """Capability-delta findings for any dependency manifest changed in `base..head` (feature #5).
+
+    Manifest bump detection is always on (cheap, offline); the capability scan fetches each version
+    from PyPI unless `PRISM_SCAN_DEPS=0`, degrading to ⚠ unresolved when offline — never assuming
+    safe. Returns [] when no manifest changed."""
+    names = [p for p in sh("git", "-C", repo, "diff", "--name-only", base, head).splitlines()
+             if deps_mod.is_manifest(p)]
+    if not names:
+        return []
+    provider = None if os.environ.get("PRISM_SCAN_DEPS") == "0" else deps_mod.pypi_source_provider
+    findings = []
+    for path in names:
+        old_map = deps_mod.parse_manifest(path, sh("git", "-C", repo, "show", f"{base}:{path}"))
+        new_map = deps_mod.parse_manifest(path, sh("git", "-C", repo, "show", f"{head}:{path}"))
+        for f in deps_mod.analyze_dependency_changes(old_map, new_map, source_provider=provider):
+            findings.append(dict(f, manifest=path))
+    return findings
 
 
 def auth_str(ep):
@@ -136,7 +211,7 @@ def diff(base_eps, head_eps):
     for route, ep in head.items():
         if route not in base:
             resolved = ep.e1_route_handler.status == "✓"
-            pii = bool(ep.e6_pii.items) and ep.e6_pii.status in {"⚠", "?"}
+            pii = bool(ep.e6_pii.items) and ep.e6_pii.status in {"✓", "⚠", "?"}
             writes = any(":write" in t for t in items(ep, "e3_db_tables"))
             ext = bool(items(ep, "e4_external"))
             money = any(k in route for k in ("payment", "order", "recharge", "invoice", "coupon"))
@@ -200,15 +275,230 @@ def diff(base_eps, head_eps):
                                 why=f"handler renamed {b.handler} → {h.handler}, semantics unchanged",
                                 detail="(refactor-stable: no semantic diff)"))
 
+    head_fan, base_fan = fanin_index(head_eps), fanin_index(base_eps)
+    for c in changes:
+        idx = base_fan if c["kind"] == "REMOVED ENDPOINT" else head_fan
+        c["blast"] = blast_radius(c["ep"], idx)
     order = {CRIT: 0, HIGH: 1, MED: 2, LOW: 3}
-    changes.sort(key=lambda c: order[c["sev"]])
+    # severity first (colors unchanged); within a tier, the change more code depends on floats up
+    changes.sort(key=lambda c: (order[c["sev"]], -c["blast"]))
     return changes
+
+
+def _plural(n, word):
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def _english_join(parts):
+    parts = list(parts)
+    if len(parts) <= 1:
+        return "".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
+def _names(names, cap=3):
+    xs = sorted(names)
+    shown = ", ".join(f"`{x}`" for x in xs[:cap])
+    return shown + (f" +{len(xs) - cap} more" if len(xs) > cap else "")
+
+
+def intent_summary(changes, findings):
+    """One deterministic sentence describing this PR's behavioral change, computed from the same
+    verified facts — every number traces to a `file:line`, so (unlike an LLM summary) it can't
+    invent a change that isn't there or miss one that is."""
+    new_eps = sum(1 for c in changes if c["kind"] == "NEW ENDPOINT")
+    removed = sum(1 for c in changes if c["kind"] == "REMOVED ENDPOINT")
+    writes, externals, pii = set(), set(), set()
+    for c in changes:
+        if c["kind"] not in ("NEW ENDPOINT", "CHANGED"):
+            continue
+        ep, base = c["ep"], c.get("base_ep")
+        def new(edge):                                    # facts on head not already on base
+            cur = items(ep, edge)
+            return cur if base is None else cur - items(base, edge)
+        writes |= {t.split(":")[0] for t in new("e3_db_tables") if ":write" in t}
+        externals |= new("e4_external")
+        pii |= new("e6_pii")
+    findings = findings or []
+    violations = sum(1 for f in findings if f["kind"] == "NEW VIOLATION")
+    weakenings = sum(1 for f in findings if f["kind"] == "WEAKENING")
+
+    adds = []
+    if new_eps:
+        adds.append(_plural(new_eps, "endpoint"))
+    if writes:
+        adds.append(_plural(len(writes), "new DB write") + " to " + _names(writes))
+    if externals:
+        adds.append(_plural(len(externals), "new external call") + " to " + _names(externals))
+    if pii:
+        adds.append(_plural(len(pii), "new PII signal"))
+    segments = []
+    if adds:
+        segments.append("adds " + _english_join(adds))
+    if removed:
+        segments.append("removes " + _plural(removed, "endpoint"))
+    if violations:
+        segments.append("introduces " + _plural(violations, "invariant violation"))
+    if weakenings:
+        segments.append("weakens " + _plural(weakenings, "invariant"))
+    if not segments:
+        return "This PR makes no changes to routing, auth, data, or external calls (internal logic only)."
+    return "This PR " + _english_join(segments) + "."
+
+
+# ---- Intent vs. behavior (feature #4) -------------------------------------------------------
+# The PR title/description is a *declared* intent — a contract the author wrote. Prism already
+# knows what the code does. Cross-check the two and flag disagreements. Competitors fake this by
+# asking an LLM to eyeball the diff; every contradiction below is derived from a verified fact
+# that traces to a `file:line`, so it can't be hallucinated. (#3 is the neutral summary; #4 is
+# the contradiction.)
+_INTENT_PHRASES = {
+    "refactor": ("refactor", "no behavior change", "no behaviour change",
+                 "no functional change", "no logic change"),
+    "docs-only": ("docs only", "docs-only", "documentation only", "doc only"),
+    "bugfix": ("bugfix", "bug fix", "hotfix"),
+}
+# conventional-commit prefixes (e.g. "refactor(auth): …") mapped to the same claim tags
+_INTENT_PREFIXES = {"refactor": ("refactor", "style"), "docs-only": ("docs",),
+                    "bugfix": ("fix", "hotfix", "bugfix")}
+
+
+def parse_intent(text):
+    """Declared-intent claims parsed from a PR title/description → a set of tags
+    (`refactor` / `docs-only` / `bugfix`). Conservative on purpose: only unambiguous phrases or
+    conventional-commit prefixes count, so a flagged contradiction is real, not a keyword accident."""
+    t = (text or "").lower()
+    head = t.split("\n", 1)[0].strip()          # a conventional-commit prefix lives on line 1
+    if head.startswith("pr #") and ":" in head:  # strip our "PR #123:" display decoration first
+        head = head.split(":", 1)[1].strip()
+    claims = set()
+    for tag, phrases in _INTENT_PHRASES.items():
+        if any(p in t for p in phrases):
+            claims.add(tag)
+    for tag, prefixes in _INTENT_PREFIXES.items():
+        if any(head.startswith(p + sep) for p in prefixes for sep in (":", "(", "!")):
+            claims.add(tag)
+    return claims
+
+
+def _behavior_evidence(changes, findings, include_refactor):
+    """(label, route, loc) for every fact that constitutes a behavioral change — the evidence a
+    'nothing really changed' claim contradicts. A pure handler rename (kind REFACTOR) is behavior-
+    preserving, so it counts only for a `docs-only` claim (include_refactor=True), not `refactor`."""
+    kind_label = {"NEW ENDPOINT": "adds an endpoint", "REMOVED ENDPOINT": "removes an endpoint",
+                  "REFACTOR": "renames a handler"}
+    ev = []
+    for c in changes:
+        if c["kind"] == "REFACTOR" and not include_refactor:
+            continue
+        label = kind_label.get(c["kind"]) or c["why"]      # CHANGED → its spelled-out sub-changes
+        ev.append((label, c["route"], f"{c['ep'].file}:{c['ep'].line}"))
+    for f in (findings or []):
+        if f["kind"] == "NEW VIOLATION":
+            ev.append((f"introduces an invariant violation ({f['stmt']})", "", ""))
+        elif f["kind"] == "WEAKENING":
+            ev.append((f"weakens an invariant ({f['stmt']})", "", ""))
+    return ev
+
+
+def _where(route, loc):
+    if route and loc:
+        return f" — `{route}` @ `{loc}`"
+    return f" — `{route or loc}`" if (route or loc) else ""
+
+
+def intent_contradictions(title, changes, findings=None, body=""):
+    """Flag where the PR's declared intent (title/description) disagrees with Prism's own facts.
+    Returns finding dicts (`sev`/`claim`/`why`/`route`/`loc`) — a finding type competitors fake
+    with an LLM, produced here from structured facts. Empty when no claim is declared, or the
+    facts are consistent with it."""
+    claims = parse_intent((title or "") + "\n" + (body or ""))
+    if not claims:
+        return []
+    # docs-only is the strongest claim (no code at all): any change, even a rename, contradicts it.
+    if "docs-only" in claims:
+        ev = _behavior_evidence(changes, findings, include_refactor=True)
+        return [dict(sev=CRIT, claim="docs-only", route=r, loc=l,
+                     why=f"claims docs-only, but {lab}{_where(r, l)}") for lab, r, l in ev]
+    if "refactor" in claims:
+        ev = _behavior_evidence(changes, findings, include_refactor=False)
+        return [dict(sev=CRIT, claim="refactor / no behavior change", route=r, loc=l,
+                     why=f"claims refactor / no behavior change, but {lab}{_where(r, l)}")
+                for lab, r, l in ev]
+    if "bugfix" in claims:                      # softer: a bugfix that grows the API surface
+        out = []
+        for c in changes:
+            if c["kind"] == "NEW ENDPOINT":
+                loc = f"{c['ep'].file}:{c['ep'].line}"
+                out.append(dict(sev=HIGH, claim="bugfix", route=c["route"], loc=loc,
+                                why=f"claims bugfix, but adds an endpoint{_where(c['route'], loc)} "
+                                    "(scope creep?)"))
+        return out
+    return []
+
+
+def render_intent_section(contradictions):
+    """Markdown block — declared intent vs. observed behavior. Sits beside the invariant panel."""
+    if not contradictions:
+        return ""
+    claim = contradictions[0]["claim"]
+    L = ["## 🎭 Intent vs. behavior",
+         f"**The PR describes itself as _{claim}_, but the facts disagree** — "
+         f"{_plural(len(contradictions), 'contradiction')}:\n"]
+    for c in contradictions:
+        L.append(f"- {c['sev']} {c['why']}")
+    L.append("\n_Declared intent = the PR title/description; each line is derived from Prism's own "
+             "facts (traceable to `file:line`), not an LLM reading the diff._\n")
+    return "\n".join(L)
+
+
+def _mm_id(s):
+    return ("N" + re.sub(r"[^A-Za-z0-9]", "", str(s))[:24]) or "N"
+
+
+def _mm_label(s):
+    """Sanitize text for a Mermaid message label (no `;` `#` newlines, no `->` arrow confusion)."""
+    return re.sub(r"[;#`\n<>|]", " ", str(s).replace("->", "→")).strip() or "?"
+
+
+def mermaid_sequence(changes, cap=12):
+    """A Mermaid `sequenceDiagram` of the PR's before→after flow — built from our own facts, not an
+    LLM drawing. Wrapped in a ```mermaid fence so GitHub renders it inline in the PR comment.
+    Only changed endpoints (new / changed / removed) participate; capped so large PRs stay legible."""
+    drawn = [c for c in changes if c["kind"] in ("NEW ENDPOINT", "CHANGED", "REMOVED ENDPOINT")]
+    if not drawn:
+        return ""
+    tag = {"NEW ENDPOINT": "🆕", "REMOVED ENDPOINT": "➖"}
+    L = ["```mermaid", "sequenceDiagram", "    participant Client"]
+    seen = set()
+    for c in drawn[:cap]:
+        ep = c["ep"]
+        hid = _mm_id(ep.handler or c["route"])
+        if hid not in seen:
+            L.append(f"    participant {hid} as {_mm_label(ep.handler or c['route'])}")
+            seen.add(hid)
+        meth = ",".join(ep.methods) or "?"
+        L.append(f"    Client->>{hid}: {tag.get(c['kind'], c['sev'])} {_mm_label(meth)} "
+                 f"{_mm_label(c['route'])}")
+        for t in sorted(items(ep, "e3_db_tables")):
+            name, _, kind = t.partition(":")
+            L.append(f"    {hid}->>Database: {_mm_label((kind or 'access') + ' ' + name)}")
+        for x in sorted(items(ep, "e4_external")):
+            L.append(f"    {hid}->>External: {_mm_label(x.split(' -> ', 1)[-1])}")
+    L.append("```")
+    return "\n".join(L)
 
 
 def render(changes, meta):
     L = []
     L.append(f"# Semantic Review — {meta['title']}")
     L.append(f"\n`{meta['base']}` → `{meta['head']}`  |  line diff: {meta['shortstat']}\n")
+    if meta.get("summary"):
+        L.append(f"> **{meta['summary']}**\n")
+    if meta.get("intent_section"):
+        L.append(meta["intent_section"])
+    if meta.get("deps_section"):
+        L.append(meta["deps_section"])
     if meta.get("inv_section"):
         L.append(meta["inv_section"])
     buckets = {CRIT: [], HIGH: [], MED: [], LOW: []}
@@ -220,6 +510,10 @@ def render(changes, meta):
     L.append("|--|--------|-------|")
     for c in changes:
         L.append(f"| {c['sev']} | {c['kind']} | `{c['route']}` |")
+    mer = mermaid_sequence(changes)
+    if mer:
+        L.append("\n### 🔀 Flow (before → after)\n")
+        L.append(mer)
     L.append("\n---\n")
     for c in changes:
         ep = c["ep"]
@@ -228,6 +522,8 @@ def render(changes, meta):
         if c.get("detail"):
             L.append(f"- {c['detail']}")
         L.append(f"- **flow:** {flow(ep)}")
+        if c.get("blast"):
+            L.append(f"- **blast radius:** shares data/services with {c['blast']} other endpoint(s)")
         L.append(f"- **investigate:**")
         L.append(f"    - `{ep.file}:{ep.line}` — handler `{ep.handler}` ({','.join(ep.methods) or '?'})")
         for loc in _dedupe(c.get("locs") or []):
@@ -255,7 +551,7 @@ def build_graph(ep):
     rid, hid = f"route:{ep.route}", f"handler:{ep.handler}"
     add(rid, ep.route, "route")
     add(hid, ep.handler, "handler", loc=f"{ep.file}:{ep.line}", auth=auth_str(ep),
-        pii=bool(ep.e6_pii.items) and ep.e6_pii.status in {"⚠", "?"})
+        pii=bool(ep.e6_pii.items) and ep.e6_pii.status in {"✓", "⚠", "?"})
     edges.append({"from": rid, "to": hid, "kind": ",".join(ep.methods) or "route"})
 
     def leaf(items, ntype, kind_of):
@@ -323,10 +619,135 @@ def build_review(changes, findings, meta, changed=None):
             graph = _state_all(build_graph(ep), "added")   # NEW ENDPOINT → all new
         return {"sev": c["sev"], "kind": c["kind"], "route": c["route"], "why": c["why"],
                 "detail": c.get("detail", ""), "auth": auth_str(ep), "flow": flow(ep),
+                "blast": c.get("blast", 0),
                 "investigate": investigate, "unknowns": unknowns(ep), "graph": graph}
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
-            "shortstat": meta["shortstat"], "invariants": findings or [],
+            "shortstat": meta["shortstat"], "summary": meta.get("summary", ""),
+            "invariants": findings or [], "contradictions": meta.get("contradictions", []),
+            "dependencies": meta.get("dependencies", []),
             "changed_lines": changed or {}, "changes": [cd(c) for c in changes]}
+
+
+def _split_where(where):
+    """'path/file.py:123' -> ('path/file.py', 123). ('path', None) if no numeric line;
+    (None, None) if empty. Mirrors ci/post_review._split_loc but tolerates a bare path."""
+    if not where:
+        return None, None
+    path, sep, line = where.rpartition(":")
+    if sep and line.isdigit():
+        return path, int(line)
+    return where, None
+
+
+def _best_location(change, changed):
+    """(path, line, in_diff) for a change — the single line a SARIF result points at.
+
+    Prefers a *fact* location that lands on a changed line (a write/external/PII line the PR
+    actually touched), then the first fact location, then the handler definition. Every change
+    carries the handler loc, so this always resolves. `in_diff` records whether that line is in
+    the PR diff — SARIF only renders inline annotations for changed lines (honest guard); the
+    rest still surface as Security-tab alerts."""
+    locs = []
+    for i, it in enumerate(change.get("investigate", [])):
+        p, ln = _split_where(it.get("where", ""))
+        if p and ln is not None:
+            locs.append((i, p, ln))            # index 0 is the handler def; >=1 is a fact
+    if not locs:
+        return None, None, False
+    facts = [l for l in locs if l[0] >= 1]
+    for i, p, ln in facts:                      # a fact line inside the diff wins
+        if ln in changed.get(p, ()):
+            return p, ln, True
+    _, p, ln = (facts or locs)[0]
+    return p, ln, ln in changed.get(p, ())
+
+
+def build_sarif(review):
+    """Serialize a structured review into SARIF 2.1.0 for GitHub code scanning.
+
+    Pure re-shaping of facts we already computed: each semantic change and each PR-introduced
+    invariant finding becomes a `result` anchored at its `file:line`. `result.level` carries the
+    severity (error/warning/note); a `security-severity` property drives the Security-tab sort.
+    No new analysis — this is the Security-tab / Files-changed surface for the same findings."""
+    changed = {p: set(v) for p, v in (review.get("changed_lines") or {}).items()}
+    rules, seen, results = [], set(), []
+
+    def rule(rid, desc):
+        if rid not in seen:
+            seen.add(rid)
+            rules.append({"id": rid, "name": rid.split("/")[-1],
+                          "shortDescription": {"text": desc},
+                          "properties": {"tags": ["prism"]}})
+
+    def emit(rid, sev, text, path, line, in_diff, fp):
+        loc = []
+        if path:
+            phys = {"artifactLocation": {"uri": path}}
+            if line is not None:
+                phys["region"] = {"startLine": line}
+            loc = [{"physicalLocation": phys}]
+        results.append({
+            "ruleId": rid, "level": SARIF_LEVEL.get(sev, "warning"),
+            "message": {"text": text}, "locations": loc,
+            "partialFingerprints": {"prism/v1": fp},
+            "properties": {"prism-severity": sev, "in-diff": in_diff,
+                           "security-severity": SARIF_SECURITY.get(sev, "4.0")},
+        })
+
+    for c in review.get("changes", []):
+        rid = "prism/" + c["kind"].lower().replace(" ", "-")
+        rule(rid, f"Prism semantic change: {c['kind']}")
+        path, line, in_diff = _best_location(c, changed)
+        text = f"{c['kind']} {c['route']} — {c.get('why', '')}".strip()
+        emit(rid, c.get("sev", MED), text, path, line, in_diff, f"{c['kind']}::{c['route']}")
+
+    for f in review.get("invariants", []):
+        if f["kind"] not in ("NEW VIOLATION", "WEAKENING", "STILL-VIOLATING", "STILL-OUT"):
+            continue                            # only real alerts; HELD/RESOLVED aren't findings
+        rid = "prism/invariant/" + f["kind"].lower().replace(" ", "-")
+        rule(rid, f"Prism invariant alert: {f['kind']}")
+        sev, stmt = f.get("sev", MED), f.get("stmt", "")
+        located = []
+        for loc in f.get("locs", []):
+            fact, _, where = loc.partition(" @ ")
+            p, ln = _split_where(where)
+            if p and ln is not None:
+                located.append((fact, p, ln))
+        if located:
+            for fact, p, ln in located:
+                emit(rid, sev, f"{stmt} — {fact}", p, ln, ln in changed.get(p, ()),
+                     f"{f['kind']}::{stmt}::{p}:{ln}")
+        else:                                   # e.g. WEAKENING has no single line — attribute to root
+            emit(rid, sev, f"{stmt} — {f.get('detail', '')}", None, None, False,
+                 f"{f['kind']}::{stmt}")
+
+    for c in review.get("contradictions", []):  # intent-vs-behavior (feature #4)
+        rid = "prism/intent-contradiction"
+        rule(rid, "Prism intent-vs-behavior contradiction")
+        p, ln = _split_where(c.get("loc", ""))
+        in_diff = bool(p and ln is not None and ln in changed.get(p, ()))
+        emit(rid, c.get("sev", HIGH), c.get("why", "intent contradiction"),
+             p, ln, in_diff, f"intent::{c.get('claim', '')}::{c.get('loc', '')}")
+
+    for d in review.get("dependencies", []):    # dependency capability-delta (feature #5)
+        if not (d.get("gained") or d.get("unresolved")):
+            continue                            # a bump with no new capabilities isn't an alert
+        rid = "prism/dependency-capability"
+        rule(rid, "Prism dependency capability change")
+        path = d.get("manifest")
+        text = f"{d['name']} {d.get('old') or '(new)'}→{d['new']} — {d.get('why', '')}"
+        emit(rid, d.get("sev", MED), text, path, None, False,
+             f"dep::{d['name']}::{d.get('new', '')}")
+
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {"name": "Prism", "informationUri": INFO_URI,
+                                "version": _prism_version(), "rules": rules}},
+            "results": results,
+        }],
+    }
 
 
 def _gh_owner_repo(url):
@@ -378,7 +799,7 @@ def resolve_github_pr(url, local, n):
     # Fetch only the commits needed for this PR into local refs so git archive can find them.
     fetch_ref("base", "refs/prism/base", base_sha, data["base"]["ref"])
     fetch_ref("head", "refs/prism/head", f"pull/{n}/head", head_sha)
-    return base_sha, head_sha, f"PR #{n}: {data.get('title', '')}"
+    return base_sha, head_sha, f"PR #{n}: {data.get('title', '')}", data.get("body") or ""
 
 
 def resolve_refs(repo, merge=None, base=None, head=None):
@@ -467,9 +888,18 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
     """
     url = repo
     repo = ensure_local(repo, update=not pr)
-    title = None
+    title, body, auto = None, "", None                # body: PR description (GitHub PRs only)
+    if not (pr or commit or merge or base or head):   # no target → current branch vs. default
+        head, base = current_branch(repo), default_branch(repo)
+        if not head or not base:
+            raise RuntimeError("no target given and could not auto-detect current vs. default "
+                               "branch — pass --base/--head, --pr, --commit, or --merge")
+        if base.split("/")[-1] == head:
+            raise RuntimeError(f"you are on the default branch ({head}) — check out a feature "
+                               "branch or pass --base/--head explicitly")
+        auto = (base, head)
     if pr:
-        base, head, title = resolve_github_pr(url, repo, pr)
+        base, head, title, body = resolve_github_pr(url, repo, pr)
         merge = None
     elif commit:
         base, head, merge = f"{commit}^", commit, None
@@ -491,9 +921,15 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
         inv_section = enforce_mod.render_section(findings)
     changes = diff(base_eps, head_eps)
     changed = changed_lines(repo, b, h)              # head-side lines a PR comment can anchor to
-    meta = dict(title=title, base=b, head=h, shortstat=shortstat, inv_section=inv_section)
+    contradictions = intent_contradictions(title, changes, findings, body=body)
+    deps_findings = dependency_findings(repo, b, h)
+    meta = dict(title=title, base=b, head=h, shortstat=shortstat, inv_section=inv_section,
+                intent_section=render_intent_section(contradictions), contradictions=contradictions,
+                deps_section=deps_mod.render_deps_section(deps_findings), dependencies=deps_findings,
+                summary=intent_summary(changes, findings))
     return dict(review=build_review(changes, findings, meta, changed), report=render(changes, meta),
-                findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps))
+                findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps),
+                auto_target=auto)
 
 
 def write_html(review, path):
@@ -506,7 +942,9 @@ def write_html(review, path):
 def main():
     ap = argparse.ArgumentParser(
         description="Semantic review of a PR. `repo` may be a local path or a git URL.")
-    ap.add_argument("repo", help="local path OR git URL (https://github.com/owner/repo)")
+    ap.add_argument("repo", nargs="?",
+                    help="local path OR git URL (default: the git repo of the current directory; "
+                         "with no target flags, reviews the current branch vs. the default branch)")
     ap.add_argument("--merge", help="review a merge commit (base=^1, head=^2)")
     ap.add_argument("--base")
     ap.add_argument("--head")
@@ -516,13 +954,24 @@ def main():
     ap.add_argument("--invariants", help="confirmed invariant corpus JSON to enforce")
     ap.add_argument("--json", dest="json_out", help="write structured review JSON")
     ap.add_argument("--html", help="write a self-contained HTML viewer")
+    ap.add_argument("--sarif", help="write SARIF 2.1.0 for GitHub code scanning")
     ap.add_argument("--fail-on", choices=["violation", "crit"], default=None,
                     help="exit non-zero on 🔴 invariant violations (violation) or any 🔴 (crit)")
     args = ap.parse_args()
 
-    res = run_review(args.repo, base=args.base, head=args.head, merge=args.merge,
-                     pr=args.pr, commit=args.commit, invariants_path=args.invariants)
+    repo = args.repo or git_toplevel(os.getcwd())
+    if not repo:
+        ap.error("no repo given and the current directory is not a git repo — "
+                 "pass a local path or a git URL")
+    try:
+        res = run_review(repo, base=args.base, head=args.head, merge=args.merge,
+                         pr=args.pr, commit=args.commit, invariants_path=args.invariants)
+    except RuntimeError as e:
+        sys.exit(f"prism: {e}")
     review, report, findings, changes = res["review"], res["report"], res["findings"], res["changes"]
+    if res.get("auto_target"):
+        b, h = res["auto_target"]
+        print(f"[auto-detected target: current branch vs. default — {h} vs. {b}]\n")
     open(args.out, "w").write(report)
     print(report)
 
@@ -530,7 +979,9 @@ def main():
         json.dump(review, open(args.json_out, "w"), ensure_ascii=False, indent=2)
     if args.html:
         write_html(review, args.html)
-    outs = ", ".join(x for x in [args.out, args.json_out, args.html] if x)
+    if args.sarif:
+        json.dump(build_sarif(review), open(args.sarif, "w"), ensure_ascii=False, indent=2)
+    outs = ", ".join(x for x in [args.out, args.json_out, args.html, args.sarif] if x)
     print(f"\n[analyzed {res['n_base']}→{res['n_head']} endpoints; wrote {outs}]")
 
     # Task 2 — gate CI

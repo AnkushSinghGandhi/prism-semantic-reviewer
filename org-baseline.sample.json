@@ -7,7 +7,7 @@
     "scope": "all endpoints performing a DB write",
     "baseline_exceptions": [],
     "confirmed": true,
-    "owner": "platform-team"
+    "owner": "security"
   },
   {
     "id": "pii-egress-authed",
@@ -21,11 +21,12 @@
   },
   {
     "id": "external-egress-allowlist",
-    "statement": "External/PII egress limited to approved destinations",
+    "statement": "External/PII egress limited to known destinations",
     "kind": "boundary",
     "severity": "critical",
     "scope": "all outbound calls",
     "observed": { "destinations": [] },
+    "baseline_exceptions": [],
     "confirmed": true,
     "owner": "security"
   }

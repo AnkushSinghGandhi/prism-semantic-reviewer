@@ -39,6 +39,13 @@ SENSITIVE = {"email", "phone", "mobile", "password", "ssn", "aadhaar", "aadhar",
              "pan", "card", "card_number", "address", "dob", "date_of_birth",
              "contact", "contact_number", "user_email", "billing_email"}
 
+# taint sinks (feature #9): where a tainted value "leaves". Egress to a third party / log / client.
+LOG_ROOTS = {"logger", "logging", "log", "LOG", "logfire"}
+LOG_METHODS = {"debug", "info", "warning", "warn", "error", "exception", "critical"}
+RESPONSE_CALLS = {"Response", "JsonResponse", "HttpResponse", "HttpResponseBadRequest"}
+# calls we propagate taint *through* (they serialize/wrap, they don't sanitize)
+TAINT_WRAPPERS = {"dumps", "dump", "str", "format", "dict", "list", "tuple", "join"}
+
 VERIFIED, POTENTIAL, UNKNOWN, NA = "✓", "⚠", "?", "n/a"
 
 
@@ -231,6 +238,8 @@ class FactCollector(ast.NodeVisitor):
         self.func_calls = []   # bare names called x(...)
         self.typed_calls = []  # (ClassName, method) called as Model.method(...)
         self.var_types = {}    # local var name -> Model (so `order.save()` → Order:write)
+        self.tainted = {}      # local var name -> {sensitive field labels it carries}
+        self.leaks = []        # (field, sink, file, line): a tainted field that reaches an egress sink
 
     def _loc(self, node):
         return (self.file, getattr(node, "lineno", 0))
@@ -277,6 +286,12 @@ class FactCollector(ast.NodeVisitor):
             self.typed_calls.append((f.value.func.id, f.attr))
         elif isinstance(f, ast.Name):
             self.func_calls.append(f.id)
+        # taint sink: a tainted (sensitive) value passed into an egress call → a traced leak
+        sink = _sink_label(f)
+        if sink:
+            for arg in list(node.args) + [kw.value for kw in node.keywords]:
+                for label in self._taint_labels(arg):
+                    self.leaks.append((label, sink, fl, ln))
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute):
@@ -290,7 +305,75 @@ class FactCollector(ast.NodeVisitor):
             model = self._model_of(node.value)
             if model:
                 self.var_types[node.targets[0].id] = model
+            labels = self._taint_labels(node.value)          # `email = user.email` → var is tainted
+            if labels:
+                self.tainted[node.targets[0].id] = set(labels)
         self.generic_visit(node)
+
+    def visit_For(self, node: ast.For):
+        # `for order in Order.objects.filter(...)` → loop var is an Order (resolves `order.save()`)
+        if isinstance(node.target, ast.Name):
+            model = self._model_of(node.iter)
+            if not model and isinstance(node.iter, ast.Name):
+                model = self.var_types.get(node.iter.id)
+            if model:
+                self.var_types[node.target.id] = model
+            labels = self._taint_labels(node.iter)           # iterating a tainted collection
+            if labels:
+                self.tainted[node.target.id] = set(labels)
+        self.generic_visit(node)
+
+    def visit_Return(self, node: ast.Return):
+        # returning a tainted value → it leaves via the HTTP response
+        if node.value is not None:
+            fl, ln = self._loc(node)
+            for label in self._taint_labels(node.value):
+                self.leaks.append((label, "response", fl, ln))
+        self.generic_visit(node)
+
+    def _taint_labels(self, node) -> set:
+        """Sensitive field labels an expression carries — the taint half of the flow. Conservative:
+        propagates through attribute/subscript reads of a sensitive name, request `.get('field')`,
+        dict/list/f-string/concat construction, and serialize-only wrappers — but NOT arbitrary
+        calls (which may sanitize), so a resulting leak is trustworthy, not a guess."""
+        if node is None:
+            return set()
+        labels = set()
+        if isinstance(node, ast.Attribute):
+            if node.attr in SENSITIVE:
+                labels.add(node.attr)
+            if isinstance(node.value, ast.Name) and node.value.id in self.tainted:
+                labels |= self.tainted[node.value.id]
+        elif isinstance(node, ast.Name):
+            labels |= self.tainted.get(node.id, set())
+        elif isinstance(node, ast.Subscript):
+            key = _subscript_key(node)
+            if key in SENSITIVE:
+                labels.add(key)
+            labels |= self._taint_labels(node.value)
+        elif isinstance(node, ast.Call):
+            f = node.func
+            fname = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else "")
+            if isinstance(f, ast.Attribute) and f.attr == "get" and node.args:
+                if _const_str(node.args[0]) in SENSITIVE:
+                    labels.add(_const_str(node.args[0]))
+            if fname in TAINT_WRAPPERS:
+                for a in list(node.args) + [k.value for k in node.keywords]:
+                    labels |= self._taint_labels(a)
+        elif isinstance(node, ast.Dict):
+            labels |= {_const_str(k) for k in node.keys if _const_str(k) in SENSITIVE}
+            for v in node.values:
+                labels |= self._taint_labels(v)
+        elif isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            for e in node.elts:
+                labels |= self._taint_labels(e)
+        elif isinstance(node, ast.JoinedStr):
+            for part in node.values:
+                if isinstance(part, ast.FormattedValue):
+                    labels |= self._taint_labels(part.value)
+        elif isinstance(node, ast.BinOp):
+            labels |= self._taint_labels(node.left) | self._taint_labels(node.right)
+        return labels
 
     @staticmethod
     def _model_of(value):
@@ -328,6 +411,37 @@ def _root_name(node):
     while isinstance(node, ast.Attribute):
         node = node.value
     return node.id if isinstance(node, ast.Name) else None
+
+
+def _subscript_key(node: ast.Subscript):
+    """The constant string key of `x['key']`, tolerating the pre-3.9 ast.Index wrapper."""
+    s = node.slice
+    if s.__class__.__name__ == "Index":     # Python <3.9 compatibility
+        s = s.value
+    return _const_str(s)
+
+
+def _sink_label(f):
+    """If a call's callee `f` is a known egress sink, its label — else None.
+    Sinks: an external client call, a Celery dispatch, a logging call, or an HTTP Response()."""
+    if isinstance(f, ast.Attribute):
+        root = _root_name(f.value)
+        if root in EXTERNAL_ROOTS and f.attr in EXTERNAL_VERBS:
+            return f"{root}.{f.attr}"
+        if f.attr in {"delay", "apply_async"}:
+            return f"celery.{f.attr}"
+        if f.attr == "send_task":
+            return "celery.send_task"
+        if f.attr in LOG_METHODS and root in LOG_ROOTS:
+            return f"log.{f.attr}"
+    if isinstance(f, ast.Name):
+        if f.id == "send_task":
+            return "celery.send_task"
+        if f.id == "print":
+            return "log.print"
+        if f.id in RESPONSE_CALLS:
+            return "response"
+    return None
 
 
 def _dest_of(node: ast.Call) -> str:
@@ -473,6 +587,7 @@ def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth):
         agg.external += local.external
         agg.async_ += local.async_
         agg.pii += local.pii
+        agg.leaks += local.leaks
     else:
         _tag_indirect(agg, local)      # reached via a call → mark it
     if depth >= MAX_FOLLOW_DEPTH:
@@ -518,6 +633,7 @@ def _tag_indirect(agg, sub):
     agg.external += [(r, d + " (via call)", f, ln) for (r, d, f, ln) in sub.external]
     agg.async_ += [(mech + " (via call)", t, f, ln) for (mech, t, f, ln) in sub.async_]
     agg.pii += sub.pii
+    agg.leaks += sub.leaks     # a leak fully inside a helper is still an intra-procedural leak
 
 
 def _first_loc(seen, key, f, ln):
@@ -579,15 +695,24 @@ def _score_pii(agg) -> Edge:
     for model, kind, f, ln in agg.db:
         if model in PERSON_MODELS and kind.rstrip("*").startswith("read"):
             _first_loc(seen, f"reads {model}", f, ln)
+    leaks = {}
+    for field, sink, f, ln in agg.leaks:
+        _first_loc(leaks, f"{field} → {sink}", f, ln)
     egress = bool(agg.external or agg.async_)
-    if not seen:
+    if not seen and not leaks:
         return Edge(NA)
-    items = [f"{fact} @ {loc}" for fact, loc in seen.items()]
+    src_items = [f"{fact} @ {loc}" for fact, loc in seen.items()]
+    if leaks:
+        # traced: a sensitive field actually flows into an egress sink (intra-procedural). The
+        # verified-leak lines lead; the raw sources follow for context.
+        leak_items = [f"{fact} @ {loc}" for fact, loc in leaks.items()]
+        return Edge(VERIFIED, leak_items + src_items,
+                    note="traced: a sensitive field flows into an egress sink (intra-procedural)")
     if egress:
-        # never claim safety: a person record or sensitive field near an egress path
-        return Edge(POTENTIAL, items,
+        # source and an egress path co-occur but no flow was traced between them → honestly potential
+        return Edge(POTENTIAL, src_items,
                     note="PII source co-occurs with an egress path — object-level taint not traced")
-    return Edge(UNKNOWN, items, note="PII source read; downstream egress not proven")
+    return Edge(UNKNOWN, src_items, note="PII source read; downstream egress not proven")
 
 
 def _rel(index, path):

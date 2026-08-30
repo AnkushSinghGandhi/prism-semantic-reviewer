@@ -7,6 +7,12 @@ into a short, ranked list of the things that actually matter: new endpoints, new
 new external calls, and data that now leaves the system. It cuts through refactor noise and points
 you at the exact lines that matter — and it's honest about what it couldn't resolve.
 
+Also: **traced PII leaks** (the exact field → where it leaves), **dependency bumps that gain new
+powers** (network/subprocess/native), PR **descriptions that contradict the code**, and the **rules
+your codebase follows** (discover, confirm, enforce, and blame the commit that broke one). Outputs to
+the terminal, a web UI, JSON, HTML, **SARIF**, inline PR comments, a triage label, and a Mermaid
+diagram. Full walkthrough: **The Complete Guide** in the repo (`blog/prism-complete-guide.md`).
+
 ## Install
 
 ```bash
@@ -70,6 +76,16 @@ prism invariants /path/to/repo --snapshots 10
 
 Ranks properties by how long they've held across history, writing `invariants_report.md` and
 `invariants.discovered.json`. Confirm the ones you want and feed them to `prism review --invariants`.
+
+### `prism digest` — org-wide roll-up for leadership
+
+```bash
+prism digest --org my-org --slack "$SLACK_WEBHOOK"
+```
+
+Counts the **open** PRs across a whole org by the `prism:*` triage label Prism already applied —
+🔴 security / 🟠 money / 🟡 new write. No re-analysis, and **no GitHub Advanced Security** needed.
+Needs a `GITHUB_TOKEN` with org read access.
 
 ## What it detects (without running your code)
 

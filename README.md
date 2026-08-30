@@ -10,6 +10,20 @@ couldn't figure out.
 
 > One line: it makes it impossible for an important change to hide inside a large PR.
 
+**📖 New here? Read [The Complete Guide](blog/prism-complete-guide.md)** — every feature, command,
+flag, and concept explained in plain English, with screenshots.
+
+**🏢 Want it on all your repos?** The guide's
+[§10 — Set up Prism for all your repos](blog/prism-complete-guide.md#10-set-up-prism-for-all-your-repos)
+is the step-by-step playbook — one central workflow, observe mode, the moat, and gating — for a
+personal account, a team, or a whole org.
+
+**What Prism finds:** new/changed endpoints & auth · new DB writes · external calls · **PII that
+actually leaves** (traced, not guessed) · **dependency bumps that gain new powers** (network /
+subprocess / native code) · PR **descriptions that contradict the code** · rules your codebase has
+always followed (and the commit that broke one). Outputs to the terminal, a web UI, JSON, HTML,
+**SARIF** (GitHub Security tab), inline PR comments, a triage label, and a Mermaid flow diagram.
+
 ---
 
 ## Install
@@ -29,13 +43,18 @@ commands as `prism review` / `prism serve` / `prism invariants`.
 
 ## Commands
 
-Prism has three commands:
+Prism has five commands:
 
 | Command | What it does |
 |---------|--------------|
 | `prism review` | semantic diff of a PR / commit / branch range (for the terminal & CI) |
+| `prism post` | post a review to a GitHub PR: sticky comment, inline comments, triage label |
 | `prism serve`  | the interactive web UI (graph view), auto-selects your current repo |
-| `prism invariants` | learn the rules your codebase has always followed, from git history |
+| `prism invariants` | learn, **confirm**, enforce, and **blame** the rules your codebase follows |
+| `prism digest` | org-wide roll-up: open PRs by `prism:*` label across every repo (for leadership) |
+
+Run `prism review` with **no arguments** inside a repo to review the current branch vs. the default
+branch. Full flag-by-flag reference: **[the Complete Guide](blog/prism-complete-guide.md)**.
 
 The **repo** can be a **local path** *or* a **GitHub URL** (URLs are cloned into a cache at
 `~/.cache/prism` and reused).
@@ -69,7 +88,8 @@ refactors don't create noise.
 prism review <repo> --pr 481 \
     --out review.md \        # Markdown (used by CI to post a sticky PR comment)
     --json review.json \     # structured data (for any other UI)
-    --html review.html       # a self-contained clickable report — open it in a browser
+    --html review.html \     # a self-contained clickable report — open it in a browser
+    --sarif review.sarif     # GitHub code scanning — findings on the changed line + Security tab
 ```
 
 **Enforce your rules & gate CI:**
@@ -85,7 +105,7 @@ With `--invariants`, the review *opens* with a 🛡 panel that separates violati
 external destination) as its own event.
 
 Flags: `--pr` · `--commit` · `--merge` · `--base/--head` · `--out` · `--json` · `--html` ·
-`--invariants` · `--fail-on {violation,crit}`.
+`--sarif` · `--invariants` · `--fail-on {violation,crit}`.
 Set `GITHUB_TOKEN` for private repos / to avoid GitHub API rate limits.
 
 ### `prism serve` — the web UI
@@ -128,8 +148,36 @@ was almost certainly on purpose). Writes `invariants_report.md` (readable) and
 `invariants.discovered.json` (a corpus with each rule, its history, and current exceptions). Set
 `"confirmed": true` on the ones you want, then pass that file to `prism review --invariants`.
 
+**Turn the moat on across many repos without hand-confirming each** —
+`prism invariants <repo> --bootstrap --baseline org-baseline.json` auto-confirms the safe rules and
+**freezes today's state as a baseline** (a ratchet — only *new* violations fire, existing debt is
+grandfathered). Seed it with a shared org baseline (see
+[`org-baseline.sample.json`](org-baseline.sample.json)) so every repo inherits the same universal
+rules; each repo's own exceptions are filled in automatically. Auto-confirmed rules are tagged
+`owner: auto-bootstrap` for later human review.
+
 > Example finding: **"Authenticated access before any DB write"** held at 100% for most of the
 > project's history, then dropped to 80% — here are the 4 endpoints that broke it, with locations.
+
+### `prism digest` — org-wide roll-up for leadership
+
+```bash
+prism digest --org my-org --slack "$SLACK_WEBHOOK"
+```
+
+Turns per-PR reviews into one number a leader can read. It counts the **open** PRs across a whole
+org that still carry each `prism:*` triage label — no re-analysis, and **no GitHub Advanced
+Security** needed (it reads labels Prism already applied):
+
+```
+🔴  4  security / PII / unauth write
+🟠  9  money path
+🟡 12  new DB write / external
+```
+
+A tier it couldn't fetch shows `?`, never a fake `0`. Needs a `GITHUB_TOKEN` with org read
+access. Add `--repos repos.txt` (one `owner/repo` per line) for an adoption line — how many repos
+have the workflow live and a confirmed invariants file. Run it on a schedule and pipe it to Slack.
 
 ---
 
@@ -158,7 +206,9 @@ jobs:
 ```
 
 Inputs: `github_token` (default `${{ github.token }}`), `fail_on`, `invariants`, `comment`,
-`inline`. The Action installs `prism-semantic-reviewer` from PyPI, reviews the PR, posts a sticky
+`inline`, `label`, `scan_deps`, `upload_sarif` (set `false` on private repos without GitHub
+Advanced Security so the code-scanning upload is skipped and the check stays green). The Action
+installs `prism-semantic-reviewer` from PyPI, reviews the PR, posts a sticky
 comment, and (with `fail_on`) fails the check when the PR introduces a violation. With `inline`
 (default `true`) it also pins each finding as an inline review comment on the exact changed line —
 findings whose location isn't in the PR's diff stay in the sticky comment.
@@ -225,7 +275,9 @@ The product is the **gap** between what the code does and what you said it shoul
 diff_pr.py     # prism review — the semantic diff engine (+ enforce + outputs)
 serve.py       # prism serve  — the web UI / API
 invariants.py  # prism invariants — discover rules from git history
+digest.py      # prism digest — org-wide roll-up from prism:* labels (no GHAS needed)
 enforce.py     # check a PR against confirmed rules
+deps.py        # dependency capability-delta scan (bumped deps that gain new powers)
 extractor/     # reads code → facts (the 6-edge lens)
 gitutil.py     # git helpers (URL clone/cache, repo detection)
 cli.py         # the `prism` entry point

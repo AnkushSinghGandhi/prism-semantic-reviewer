@@ -23,10 +23,25 @@ inputs:
     description: 'Also pin each finding as an inline review comment on the exact changed line (true/false)'
     required: false
     default: 'true'
+  label:
+    description: 'Apply one prism:* triage label for the PR top severity (true/false; needs issues: write)'
+    required: false
+    default: 'true'
+  scan_deps:
+    description: 'Scan bumped dependencies for new capabilities via PyPI (true/false; off = ⚠ unresolved, no network)'
+    required: false
+    default: 'true'
+  upload_sarif:
+    description: 'Upload SARIF to GitHub code scanning (true/false). Needs GitHub Advanced Security on private repos; set false without it so the step does not fail and the check stays green.'
+    required: false
+    default: 'true'
 outputs:
   review_markdown:
     description: 'Path to the generated markdown review'
     value: 'pr_review.md'
+  review_sarif:
+    description: 'Path to the generated SARIF file (GitHub code scanning)'
+    value: 'pr_review.sarif'
 runs:
   using: 'composite'
   steps:
@@ -43,11 +58,21 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        PRISM_SCAN_DEPS: ${{ inputs.scan_deps == 'false' && '0' || '1' }}
       run: |
-        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md --json pr_review.json"
+        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md --json pr_review.json --sarif pr_review.sarif"
         if [ -n "${{ inputs.invariants }}" ]; then CMD="$CMD --invariants ${{ inputs.invariants }}"; fi
         if [ "${{ inputs.fail_on }}" != "none" ]; then CMD="$CMD --fail-on ${{ inputs.fail_on }}"; fi
         echo "$CMD"; eval "$CMD"
+
+    - name: Upload SARIF to code scanning
+      # Needs `permissions: security-events: write` + GitHub Advanced Security (private repos).
+      # Set `upload_sarif: false` without GHAS so this step is skipped and the check stays green.
+      if: ${{ always() && inputs.upload_sarif == 'true' && hashFiles('pr_review.sarif') != '' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: pr_review.sarif
+        category: prism
 
     - name: Post sticky PR comment
       if: ${{ always() && inputs.comment == 'true' && hashFiles('pr_review.md') != '' }}
@@ -57,8 +82,11 @@ runs:
         GITHUB_REPOSITORY: ${{ github.repository }}
       run: |
         POST_ARGS="${{ github.event.pull_request.number }} pr_review.md"
-        if [ "${{ inputs.inline }}" = "true" ] && [ -f pr_review.json ]; then
-          POST_ARGS="$POST_ARGS --json pr_review.json --inline"
+        EXTRA=""
+        if [ "${{ inputs.inline }}" = "true" ]; then EXTRA="$EXTRA --inline"; fi
+        if [ "${{ inputs.label }}" = "true" ]; then EXTRA="$EXTRA --label"; fi
+        if [ -n "$EXTRA" ] && [ -f pr_review.json ]; then
+          POST_ARGS="$POST_ARGS --json pr_review.json$EXTRA"
         fi
         python "${GITHUB_ACTION_PATH}/ci/post_review.py" $POST_ARGS \
-          || echo "::warning::could not post comment — ensure the job has 'permissions: pull-requests: write'"
+          || echo "::warning::could not post comment — ensure the job has 'permissions: pull-requests: write, issues: write'"

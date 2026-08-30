@@ -33,6 +33,25 @@ def git_toplevel(path="."):
         return ""
 
 
+def current_branch(repo="."):
+    """Short name of the checked-out branch, or '' if detached HEAD / not a repo."""
+    b = sh("git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD")
+    return "" if b in ("", "HEAD") else b
+
+
+def default_branch(repo="."):
+    """Best guess at the repo's mainline branch, as a ref usable for a diff base: `origin/HEAD`
+    if the remote advertises one, else a local/remote `main` or `master`. '' if none is found."""
+    ref = sh("git", "-C", repo, "rev-parse", "--abbrev-ref", "origin/HEAD")   # e.g. "origin/main"
+    if ref and ref != "origin/HEAD":
+        return ref
+    for name in ("main", "master"):
+        for cand in (f"origin/{name}", name):
+            if sh("git", "-C", repo, "rev-parse", "--verify", "--quiet", cand):
+                return cand
+    return ""
+
+
 def ensure_local(repo, update=True):
     """Accept a local path OR a git URL. URLs are cloned into a cache and reused; returns a
     local path either way — so every command that takes a `repo` also takes a GitHub link."""

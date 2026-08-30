@@ -25,10 +25,28 @@ from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import diff_pr           # noqa: E402
-from gitutil import is_url, git_toplevel  # noqa: E402
+import invariants as inv_mod                          # noqa: E402
+from gitutil import is_url, git_toplevel, ensure_local  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CACHE = {}   # (repo, merge, base, head, pr, inv) -> review
+CACHE = {}       # (repo, merge, base, head, pr, inv) -> review
+INV_CACHE = {}   # (repo, n) -> [candidate dict]  (discovery is expensive; cache per repo)
+
+
+def _discovered(repo, n):
+    """Discovered invariant candidates (corpus dicts) for `repo`, cached per (repo, n)."""
+    key = (repo, n)
+    if key not in INV_CACHE:
+        _, cands = inv_mod.discover(ensure_local(repo), n)
+        INV_CACHE[key] = inv_mod.corpus(cands)
+    return INV_CACHE[key]
+
+
+def _read_corpus(path):
+    if path and os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    return []
 
 
 def make_handler(cfg):
@@ -108,6 +126,76 @@ def make_handler(cfg):
                                                  invariants_path=inv)
                         CACHE[key] = res["review"]
                     return self._json(200, CACHE[key])
+                if path == "/api/invariants":
+                    repo = g("repo") or cfg["repo"]
+                    if not repo:
+                        return self._json(400, {"error": "no repo given"})
+                    if not self._repo_ok(repo):
+                        return self._json(403, {"error": "repo not in allowlist"})
+                    cands = _discovered(repo, int(g("snapshots", "6")))
+                    confirmed_ids = [c["id"] for c in _read_corpus(cfg["invariants"])
+                                     if c.get("confirmed")]
+                    return self._json(200, {"repo": repo, "candidates": cands,
+                                            "confirmed_ids": confirmed_ids,
+                                            "corpus": cfg["invariants"],
+                                            "can_confirm": bool(cfg["invariants"])})
+                if path == "/api/blame":
+                    repo = g("repo") or cfg["repo"]
+                    if not repo:
+                        return self._json(400, {"error": "no repo given"})
+                    if not self._repo_ok(repo):
+                        return self._json(403, {"error": "repo not in allowlist"})
+                    inv_id = g("id")
+                    if not inv_id:
+                        return self._json(400, {"error": "no invariant id (?id=…)"})
+                    result = inv_mod.blame_invariant(ensure_local(repo), inv_id, route=g("route"),
+                                                     n=int(g("snapshots", "8")), exact=g("exact") == "1")
+                    return self._json(200, {"repo": repo, "id": inv_id, "result": result,
+                                            "text": inv_mod.render_blame(result, inv_id, g("route"))})
+                return self._json(404, {"error": "not found"})
+            except Exception as e:
+                traceback.print_exc()
+                return self._json(500, {"error": str(e)})
+
+        def do_POST(self):
+            u = urlparse(self.path)
+            q = parse_qs(u.query)
+            g = lambda k, d=None: (q.get(k) or [d])[0]  # noqa: E731
+            path = u.path
+            bp = cfg["base_path"]
+            if bp and path.startswith(bp):
+                path = path[len(bp):] or "/"
+            try:
+                if not self._authorized(g):
+                    return self._json(401, {"error": "unauthorized — append ?token=…"})
+                length = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(length) or "{}") if length else {}
+
+                if path == "/api/invariants/confirm":
+                    # Confirm one discovered candidate into the *server-configured* corpus only —
+                    # the client never supplies a write path (no arbitrary file writes).
+                    corpus_path = cfg["invariants"]
+                    if not corpus_path or is_url(corpus_path):
+                        return self._json(400, {"error": "confirming needs a local corpus file — "
+                                                "start `prism serve --invariants <path.json>`"})
+                    repo = body.get("repo") or cfg["repo"]
+                    if not repo:
+                        return self._json(400, {"error": "no repo given"})
+                    if not self._repo_ok(repo):
+                        return self._json(403, {"error": "repo not in allowlist"})
+                    inv_id = body.get("id")
+                    cands = _discovered(repo, int(body.get("snapshots", 6)))
+                    match = next((c for c in cands if c["id"] == inv_id), None)
+                    if not match:
+                        return self._json(404, {"error": f"no discovered candidate {inv_id!r}"})
+                    confirmed = inv_mod.confirm_candidate(
+                        match, owner=body.get("owner"), keep_baseline=body.get("keep_baseline", True))
+                    merged = inv_mod.merge_corpus(_read_corpus(corpus_path), [confirmed])
+                    with open(corpus_path, "w", encoding="utf-8") as f:
+                        json.dump(merged, f, indent=2, ensure_ascii=False)
+                    return self._json(200, {"ok": True, "id": inv_id,
+                                            "confirmed_ids": [c["id"] for c in merged
+                                                              if c.get("confirmed")]})
                 return self._json(404, {"error": "not found"})
             except Exception as e:
                 traceback.print_exc()

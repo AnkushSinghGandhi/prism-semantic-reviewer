@@ -19,6 +19,8 @@
   input{min-width:340px}select{min-width:340px;max-width:520px}
   button{cursor:pointer}button:hover{border-color:var(--link)}
   .sub{color:var(--mut);font-size:12.5px;margin-top:8px}
+  .summary{font-size:14px;font-weight:600;line-height:1.4;margin-top:8px}
+  .summary:empty{display:none}
   .tally{display:flex;gap:12px;margin-top:6px;font-size:12.5px}
   .inv{margin:12px 18px 0;border:1px solid var(--crit);border-radius:8px;background:rgba(248,81,73,.08)}
   .inv h2{margin:0;padding:9px 13px;font-size:13px;border-bottom:1px solid var(--line)}
@@ -127,6 +129,8 @@
     <span class="lbl mono">repo</span>
     <input id="repo" style="min-width:440px" placeholder="/path/to/local/repo">
     <button onclick="loadRepo()"><b>Load</b></button>
+    <button onclick="reviewDefault()" title="Review the current branch vs. the default branch">Branch vs default</button>
+    <button onclick="loadInvariants()" title="Discover & confirm the rules this codebase follows">⚖ Invariants</button>
   </div>
   <div class="bar">
     <span class="lbl mono">PR</span>
@@ -151,6 +155,7 @@
   <input type="hidden" id="prnum"><input type="hidden" id="commit">
   <input type="hidden" id="base"><input type="hidden" id="head">
   <div class="sub" id="status">Enter a local repo path and hit Load — then pick a PR, or compare two branches or two commits.</div>
+  <div class="summary" id="summary"></div>
   <div class="tally" id="tally"></div>
 </header>
 <div id="welcome">
@@ -171,6 +176,7 @@
   </div>
 </div>
 <div id="invwrap"></div>
+<div id="invpanel"></div>
 <main>
   <div id="list"><div class="filters" id="filters"></div><div id="items"></div></div>
   <div id="detail"><div class="empty">Run a review, then select a change.</div></div>
@@ -211,6 +217,72 @@ async function getJSON(url){
   let d; try{d=JSON.parse(t);}catch(_){throw new Error(`HTTP ${r.status}: ${t.slice(0,140)}`);}
   if(!r.ok||d.error) throw new Error(d.error||`HTTP ${r.status}`);
   return d;
+}
+async function postJSON(url,body){
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})});
+  const t=await r.text();
+  let d; try{d=JSON.parse(t);}catch(_){throw new Error(`HTTP ${r.status}: ${t.slice(0,140)}`);}
+  if(!r.ok||d.error) throw new Error(d.error||`HTTP ${r.status}`);
+  return d;
+}
+
+// ⚖ Invariants — discover candidate rules and confirm them into the corpus (the moat, in the UI)
+async function loadInvariants(){
+  const repo=val("repo").trim();
+  if(!repo){status("Enter a local repo path first.");return;}
+  status("Discovering invariants… (samples git history — the first run can take a moment)");
+  try{
+    const d=await getJSON(apiURL("api/invariants",{repo}));
+    renderInvPanel(d);
+    status(`${(d.candidates||[]).length} candidate invariant(s).`+
+           (d.can_confirm?" Confirm the ones that are intentional.":
+            " (read-only — start `prism serve --invariants <path>` to confirm)"));
+    document.getElementById("invpanel").scrollIntoView({behavior:"smooth",block:"nearest"});
+  }catch(e){status("Error: "+e);}
+}
+function renderInvPanel(d){
+  const confirmed=new Set(d.confirmed_ids||[]);
+  const rows=(d.candidates||[]).map(c=>{
+    const obs=c.observed||{};
+    const held=obs.ratio!=null?`holds ${obs.ok}/${obs.total} (${Math.round(obs.ratio*100)}%)`:"";
+    const exc=c.baseline_exceptions||[];
+    const excHtml=exc.length?`<div class="det">${exc.length} exception(s): ${esc(exc.slice(0,4).map(e=>e.route).join(", "))}${exc.length>4?" …":""}</div>`:"";
+    const act=confirmed.has(c.id)?`<span class="det" style="color:var(--low)">✓ confirmed</span>`
+      :d.can_confirm?`<button onclick="confirmInv('${esc(c.id)}')">Confirm</button>`
+      :`<span class="det">read-only</span>`;
+    const canBlame=c.id==="auth-before-write"||c.id==="pii-egress-authed"||c.id.indexOf("auth-group:")===0;
+    const blame=canBlame?` <button onclick="blameInv('${esc(c.id)}')" title="Which commit first broke this rule?">🩸 Blame</button>`:"";
+    return `<div class="row"><div><b>${esc(c.severity||"")} ${esc(c.statement)}</b> <span class="det">[${esc(c.kind||"")}]</span></div>`+
+      (held?`<div class="det">${esc(held)}</div>`:"")+excHtml+
+      `<div style="margin-top:6px">${act}${blame}</div><div class="det mono" id="blame-${esc(c.id).replace(/[^a-z-]/gi,'_')}"></div></div>`;
+  }).join("");
+  document.getElementById("invpanel").innerHTML=
+    `<div class="inv"><h2>⚖ Invariants — confirm the rules this codebase already follows</h2>`+
+    (rows||`<div class="det">no candidate invariants discovered</div>`)+`</div>`;
+}
+async function confirmInv(id){
+  const repo=val("repo").trim();
+  status(`Confirming ${id}…`);
+  try{
+    await postJSON(apiURL("api/invariants/confirm"),{repo,id});
+    await loadInvariants();                 // refresh so it shows ✓ confirmed
+    status(`Confirmed “${id}” — it will now be enforced on every review.`);
+  }catch(e){status("Error: "+e);}
+}
+async function blameInv(id){
+  const repo=val("repo").trim();
+  const slot=document.getElementById("blame-"+id.replace(/[^a-z-]/gi,'_'));
+  if(slot) slot.textContent="🩸 blaming… (walks git history — a moment)";
+  try{
+    const d=await getJSON(apiURL("api/blame",{repo,id,exact:"1"}));
+    if(slot) slot.textContent=d.text;
+  }catch(e){ if(slot) slot.textContent="Error: "+e; }
+}
+// Gap #4 — one-click "review current branch vs. the default branch" (backend auto-detects)
+function reviewDefault(){
+  const repo=val("repo").trim();
+  if(!repo){status("Enter a local repo path first.");return;}
+  setVal("pr",""); clearRefs(); review();   // no refs sent → /api/review auto-detects branch↔default
 }
 
 function val(id){return document.getElementById(id).value;}
@@ -293,16 +365,26 @@ async function review(){
 
 function render(){
   document.body.classList.add("loaded");   // swap the welcome screen for the results layout
+  document.getElementById("summary").textContent = DATA.summary || "";
   const counts={}; DATA.changes.forEach(c=>counts[c.sev]=(counts[c.sev]||0)+1);
   document.getElementById("tally").innerHTML=
     ["🔴","🟠","🟡","🟢"].filter(s=>counts[s]).map(s=>`<b>${s} ${counts[s]}</b>`).join("&nbsp;&nbsp;")
     +`<span style="color:var(--mut)">${DATA.changes.length} semantic changes</span>`;
+  const contra=DATA.contradictions||[];         // intent-vs-behavior (feature #4)
+  const contraHtml = contra.length ?
+    `<div class="inv"><h2>🎭 Intent vs. behavior — PR describes itself as “${esc(contra[0].claim)}”, but the facts disagree</h2>`+
+    contra.map(c=>`<div class="row"><div>${c.sev} ${esc(c.why).replace(/\x60/g,"")}</div></div>`).join("")+`</div>` : "";
+  const deps=(DATA.dependencies||[]).filter(d=>(d.gained&&d.gained.length)||d.unresolved);   // feature #5
+  const depsHtml = deps.length ?
+    `<div class="inv"><h2>📦 Dependency capability changes</h2>`+
+    deps.map(d=>`<div class="row"><div>${d.unresolved?"⚠":d.sev} <b>${esc(d.name)} ${esc(d.old||"(new)")}→${esc(d.new)}</b> — ${esc(d.why)}</div></div>`).join("")+`</div>` : "";
   const alerts=(DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
-  document.getElementById("invwrap").innerHTML = alerts.length ?
+  const invHtml = alerts.length ?
     `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
     alerts.map(f=>`<div class="row"><div><b>${f.sev} ${f.kind}</b> — ${esc(f.stmt)}</div>`+
       (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
       (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")+`</div>` : "";
+  document.getElementById("invwrap").innerHTML = contraHtml + depsHtml + invHtml;
   const fbar=document.getElementById("filters"); fbar.innerHTML="";
   ["🔴","🟠","🟡","🟢"].forEach(s=>{const b=document.createElement("button");
     b.textContent=`${s} ${counts[s]||0}`; if(!active.has(s))b.classList.add("off");
@@ -310,6 +392,10 @@ function render(){
     fbar.appendChild(b);});
   renderList();
   document.getElementById("detail").innerHTML='<div class="empty">Select a change.</div>';
+  // deep links: ?open=N selects a change (shows its flow graph), ?invariants=1 opens the panel
+  const P=new URLSearchParams(location.search);
+  if(P.has("open")){const i=+P.get("open")||0, c=DATA.changes[i]; if(c){sel=i;renderList();renderDetail(c);}}
+  if(P.get("invariants")==="1") loadInvariants();
 }
 
 function renderList(){

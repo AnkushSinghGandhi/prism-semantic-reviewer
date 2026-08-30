@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prism-semantic-reviewer"
-version = "0.1.5"
+version = "0.2.0"
 description = "Semantic PR Reviewer for Python Web Applications"
 readme = "PYPI_README.md"
 requires-python = ">=3.8"
@@ -27,6 +27,6 @@ Repository = "https://github.com/AnkushSinghGandhi/prism"
 prism = "cli:main"
 
 [tool.setuptools]
-py-modules = ["cli", "diff_pr", "serve", "gitutil", "enforce", "invariants"]
-packages = ["web", "extractor"]
+py-modules = ["cli", "diff_pr", "serve", "gitutil", "enforce", "invariants", "deps", "digest"]
+packages = ["web", "extractor", "ci"]
 package-data = { "web" = ["app.html", "viewer.template.html"] }

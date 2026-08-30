@@ -40,3 +40,13 @@ USAGE.md
 later.md
 plan.md
 
+# Generated tool output — default --json/--csv/--out paths; never commit (they regenerate)
+facts*.json
+scored*.csv
+*_review.md
+*_review.json
+*_review.html
+invariants.discovered.json
+invariants.confirmed.json
+invariants_report.md
+

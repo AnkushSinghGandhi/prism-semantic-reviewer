@@ -10,8 +10,10 @@ def main():
         print("\nUsage: prism <command> [options]")
         print("\nCommands:")
         print("  review    Run a semantic review of a PR or commit range")
+        print("  post      Post a review to a PR (sticky comment, inline comments, label)")
         print("  serve     Start the Prism web UI")
         print("  invariants Discover baseline invariants from a repository's history")
+        print("  digest    Org-wide leadership roll-up from the labels Prism applies to PRs")
         print("\nRun 'prism <command> --help' for more information on a command.")
         sys.exit(0)
 
@@ -21,10 +23,13 @@ def main():
 
     if command == "review":
         import diff_pr
-        # If no arguments provided, trigger diff_pr's help
+        # No args → review the current repo's branch vs. its default branch (diff_pr resolves it).
+        diff_pr.main()
+    elif command == "post":
+        from ci import post_review
         if len(sys.argv) == 1:
             sys.argv.append("--help")
-        diff_pr.main()
+        post_review.main()
     elif command == "serve":
         import serve
         serve.main()
@@ -33,6 +38,11 @@ def main():
         if len(sys.argv) == 1:
             sys.argv.append("--help")
         invariants.main()
+    elif command == "digest":
+        import digest
+        if len(sys.argv) == 1:
+            sys.argv.append("--help")
+        digest.main()
     else:
         print(f"Unknown command: {command}")
         sys.exit(1)

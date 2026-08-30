@@ -3,7 +3,7 @@
 Post the semantic review to a PR: a sticky summary comment, and (optionally) an inline comment
 pinned to the exact changed line for every finding we can anchor.
 
-    python ci/post_review.py <pr_number> <body_file> [--json review.json] [--inline] [--dry-run]
+    python ci/post_review.py <pr_number> <body_file> [--json review.json] [--inline] [--label] [--dry-run]
 
 Sticky comment (always): find the prior comment carrying the hidden marker and PATCH it, else
 POST a new one — repeated pushes update in place instead of piling up.
@@ -14,14 +14,22 @@ we can't anchor (its line isn't in the diff — GitHub would 422) is left to the
 which always carries the full review. Prior Prism inline comments (marker-tagged) are deleted
 first so pushes don't stack duplicates. We only pin a comment where we can prove the line changed.
 
+Label (opt-in; needs --json + --label): apply one `prism:*` triage label for the PR's top
+severity so the queue is scannable at a glance; a prior Prism label is replaced, not stacked.
+
 Uses `gh api` (present on GitHub runners) with GITHUB_TOKEN.
 """
 import json
 import os
 import subprocess
 import sys
+from urllib.parse import quote
 
 MARKER = "<!-- semantic-review -->"
+# One triage label per severity tier — the PR's worst signal picks exactly one.
+LABELS = {"🔴": "prism:🔴security", "🟠": "prism:🟠payment",
+          "🟡": "prism:🟡new-write", "🟢": "prism:🟢safe-refactor"}
+_SEV_ORDER = ["🔴", "🟠", "🟡", "🟢"]
 
 
 def gh_api(args, input_text=None):
@@ -126,25 +134,65 @@ def post_inline(repo, pr, review, dry):
     print(f"posted {len(comments)} inline comment(s) on PR #{pr} ({unanchored} left to sticky)")
 
 
+def pick_label(review):
+    """The single triage label for this PR — the worst severity across semantic changes, invariant
+    alerts, and intent contradictions. No signal at all → the 🟢 safe-refactor label."""
+    sevs = [c.get("sev") for c in review.get("changes", [])]
+    sevs += [f.get("sev") for f in review.get("invariants", [])
+             if f.get("kind") in ("NEW VIOLATION", "WEAKENING")]
+    sevs += [c.get("sev") for c in review.get("contradictions", [])]
+    sevs = [s for s in sevs if s in LABELS]
+    top = min(sevs, key=_SEV_ORDER.index) if sevs else "🟢"
+    return LABELS[top]
+
+
+def post_label(repo, pr, review, dry):
+    """Apply one `prism:*` triage label (top severity), replacing any prior Prism label so pushes
+    don't stack. Adding a label that doesn't exist yet creates it (GitHub default color)."""
+    target = pick_label(review)
+    if dry:
+        print(f"[dry-run] label PR #{pr} → {target} (drop any other prism:* label)")
+        return
+
+    r = gh_api(["-X", "POST", f"repos/{repo}/issues/{pr}/labels", "--input", "-"],
+               input_text=json.dumps({"labels": [target]}))
+    if r.returncode != 0:
+        print(f"::warning::could not add label {target} "
+              f"(needs 'permissions: issues: write'): {r.stderr.strip()}")
+        return
+    # the POST returns the issue's full label set — drop any earlier prism:* label that isn't ours
+    for lbl in json.loads(r.stdout or "[]"):
+        name = lbl.get("name", "") if isinstance(lbl, dict) else ""
+        if name.startswith("prism:") and name != target:
+            gh_api(["-X", "DELETE", f"repos/{repo}/issues/{pr}/labels/{quote(name, safe='')}"])
+    print(f"labeled PR #{pr}: {target}")
+
+
 def main():
     args = sys.argv[1:]
     dry = "--dry-run" in args
     inline = "--inline" in args
+    label = "--label" in args
     json_path = args[args.index("--json") + 1] if "--json" in args else None
     positional = [a for a in args if not a.startswith("--") and a != json_path]
     if len(positional) < 2:
         sys.exit("usage: post_review.py <pr_number> <body_file> "
-                 "[--json review.json] [--inline] [--dry-run]")
+                 "[--json review.json] [--inline] [--label] [--dry-run]")
     pr, body_file = positional[0], positional[1]
     repo = os.environ.get("GITHUB_REPOSITORY", "OWNER/REPO")
 
     post_sticky(repo, pr, body_file, dry)
 
-    if inline:
+    review = None
+    if inline or label:
         if not json_path or not os.path.exists(json_path):
-            print("::warning::--inline needs --json <review.json>; skipping inline comments")
+            print("::warning::--inline/--label need --json <review.json>; skipping")
         else:
-            post_inline(repo, pr, json.load(open(json_path, encoding="utf-8")), dry)
+            review = json.load(open(json_path, encoding="utf-8"))
+    if inline and review is not None:
+        post_inline(repo, pr, review, dry)
+    if label and review is not None:
+        post_label(repo, pr, review, dry)
 
 
 if __name__ == "__main__":
