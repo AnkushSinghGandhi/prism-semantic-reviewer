@@ -48,6 +48,15 @@ prism review <repo> --pr 481 \
 
 Set `GITHUB_TOKEN` for private repos / to avoid GitHub API rate limits.
 
+### `prism post` — put a review on a GitHub PR
+
+```bash
+prism post 481 review.md --json review.json --inline --label
+```
+
+Posts a sticky summary comment, inline comments pinned to the exact changed lines, and one `prism:*`
+triage label. Needs `GITHUB_TOKEN` + the `gh` CLI (present on GitHub runners).
+
 ### `prism serve` — interactive web UI (with graph view)
 
 ```bash
@@ -76,6 +85,10 @@ prism invariants /path/to/repo --snapshots 10
 
 Ranks properties by how long they've held across history, writing `invariants_report.md` and
 `invariants.discovered.json`. Confirm the ones you want and feed them to `prism review --invariants`.
+
+Or **bootstrap every repo at once**: `prism invariants <repo> --bootstrap --baseline org-baseline.json`
+auto-confirms the safe rules and freezes today's state, so it only flags *new* violations — turning
+the moat on across many repos with no hand-confirming.
 
 ### `prism digest` — org-wide roll-up for leadership
 
@@ -115,6 +128,10 @@ jobs:
         with:
           fail_on: violation   # violation | crit | none
 ```
+
+Inputs include `fail_on`, `invariants`, `comment`, `inline`, `label`, `scan_deps`, and
+`upload_sarif` (set `false` on private repos without GitHub Advanced Security so the SARIF upload is
+skipped and the check stays green).
 
 Full documentation, the graph UI, and architecture details:
 [GitHub repository](https://github.com/AnkushSinghGandhi/prism).
