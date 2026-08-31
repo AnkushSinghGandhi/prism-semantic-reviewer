@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "prism-semantic-reviewer"
-version = "0.3.0"
+name = "pryti-semantic-reviewer"
+version = "0.4.0"
 description = "Semantic PR Reviewer for Python Web Applications"
 readme = "PYPI_README.md"
 requires-python = ">=3.8"
@@ -20,11 +20,11 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/AnkushSinghGandhi/prism"
-Repository = "https://github.com/AnkushSinghGandhi/prism"
+Homepage = "https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer"
+Repository = "https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer"
 
 [project.scripts]
-prism = "cli:main"
+pryti = "cli:main"
 
 [tool.setuptools]
 py-modules = ["cli", "diff_pr", "serve", "gitutil", "enforce", "invariants", "deps", "digest"]

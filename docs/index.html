@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Prism — deterministic semantic PR reviewer (no LLM, no API key)</title>
-<meta name="description" content="A deterministic semantic PR reviewer for Python web apps. No LLM, no API key, no per-PR token bill — same PR in, same review out. Git tells you what lines changed; Prism tells you what they mean and where to look.">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◭</text></svg>">
+<title>Pryti — deterministic semantic PR reviewer (no LLM, no API key)</title>
+<meta name="description" content="A deterministic semantic PR reviewer for Python web apps. No LLM, no API key, no per-PR token bill — same PR in, same review out. Git tells you what lines changed; Pryti tells you what they mean and where to look.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✦</text></svg>">
 <style>
   :root{
     --bg:#0b0e14; --panel:#131823; --panel2:#0f141d; --line:#232a38;
@@ -93,8 +93,8 @@
   .cmp th,.cmp td{padding:12px 12px;border-bottom:1px solid var(--line);text-align:center}
   .cmp th:first-child,.cmp td:first-child{text-align:left;color:var(--muted);font-weight:600}
   .cmp thead th{color:var(--muted);font-weight:600;font-size:13px}
-  .cmp .col-prism{background:rgba(168,85,247,.10);color:var(--text)}
-  .cmp thead .col-prism{color:var(--accent);font-weight:800}
+  .cmp .col-pryti{background:rgba(168,85,247,.10);color:var(--text)}
+  .cmp thead .col-pryti{color:var(--accent);font-weight:800}
   .cmp .y{color:var(--low);font-weight:700}.cmp .n{color:var(--crit)}.cmp .p{color:var(--med)}
 
   .pills{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
@@ -128,19 +128,19 @@
 <div class="spectrum"></div>
 
 <nav><div class="wrap">
-  <div class="logo">◭ <span>Prism</span></div>
+  <div class="logo">✦ <span>Pryti</span></div>
   <div class="links">
     <a href="#how">How it works</a>
     <a href="#lens">The lens</a>
     <a href="#moat">The moat</a>
-    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">GitHub</a>
+    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer">GitHub</a>
   </div>
 </div></nav>
 
 <header class="hero"><div class="wrap">
-  <div class="mark">◭</div>
+  <div class="mark">✦</div>
   <h1>See what a pull request <em>actually</em> changes — <em>no LLM required</em></h1>
-  <p class="sub">Git tells you what <b>lines</b> changed. Prism tells you what they <b>mean</b> — and points you at the exact line to read.</p>
+  <p class="sub">Git tells you what <b>lines</b> changed. Pryti tells you what they <b>mean</b> — and points you at the exact line to read.</p>
   <p class="one">A <b>deterministic</b> semantic PR reviewer for Python web apps. No AI black box, no API key, no per-PR token bill — same PR in, same review out, every time.</p>
   <div class="pills" style="justify-content:center">
     <span class="pill"><b>No LLM</b></span>
@@ -150,16 +150,16 @@
     <span class="pill"><b>Runs offline</b></span>
   </div>
   <div class="cta">
-    <a class="btn primary" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">Get started on GitHub</a>
-    <a class="btn ghost" href="https://pypi.org/project/prism-semantic-reviewer/">View on PyPI</a>
-    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/blog/prism-complete-guide.md">Read the guide</a>
+    <a class="btn primary" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer">Get started on GitHub</a>
+    <a class="btn ghost" href="https://pypi.org/project/pryti-semantic-reviewer/">View on PyPI</a>
+    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer/blob/main/blog/pryti-complete-guide.md">Read the guide</a>
   </div>
   <div class="install">
-    <code id="pip">pip install prism-semantic-reviewer</code>
+    <code id="pip">pip install pryti-semantic-reviewer</code>
     <button onclick="navigator.clipboard.writeText(document.getElementById('pip').textContent);this.textContent='copied'">copy</button>
   </div>
   <div class="meta">
-    <a class="star" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">★ Star on GitHub</a>
+    <a class="star" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer">★ Star on GitHub</a>
     <span class="sep">·</span>
     <a class="sponsor" href="https://github.com/sponsors/AnkushSinghGandhi">♥ Sponsor</a>
     <span class="sep">·</span>
@@ -176,7 +176,7 @@
   <p class="lead">A normal line-diff buries the one change that matters — "user email now leaves the server" — under thousands of mechanical edits. You don't need to read all of it. You need to know <b>what changed</b> in behavior, <b>how it flows</b>, <b>where to look</b>, and <b>whether it broke a promise</b>.</p>
 
   <div class="term">
-    <div class="bar">$ prism review . --pr 481 &nbsp;&nbsp;→&nbsp;&nbsp; <b>🔴 3</b> &nbsp; <i>🟠 4</i> &nbsp; <span style="color:#e3b341">🟡 4</span> &nbsp; <s>🟢 20</s></div>
+    <div class="bar">$ pryti review . --pr 481 &nbsp;&nbsp;→&nbsp;&nbsp; <b>🔴 3</b> &nbsp; <i>🟠 4</i> &nbsp; <span style="color:#e3b341">🟡 4</span> &nbsp; <s>🟢 20</s></div>
 <pre><span class="muted"># 17,841 lines changed → 3 things to actually look at</span>
 
 <span class="c-crit">🔴 NEW ENDPOINT</span>  <b>/api/companions/payment</b>
@@ -198,31 +198,31 @@
   <div class="eyebrow">See it</div>
   <h2>What changed → how it flows → where to look</h2>
   <p class="lead">A ranked list, an interactive flow graph for every change, and the exact <code>file:line</code> locations — in the terminal, a web UI, a PR comment, or your Security tab.</p>
-  <div class="shot"><img src="images/01-review.png" alt="A finished Prism review in the web UI"></div>
+  <div class="shot"><img src="images/01-review.png" alt="A finished Pryti review in the web UI"></div>
 </div></section>
 
 <!-- why -->
 <section id="why"><div class="wrap">
-  <div class="eyebrow">Why Prism</div>
+  <div class="eyebrow">Why Pryti</div>
   <h2>Why not just read the diff?</h2>
   <p class="lead">Because on an 18,000-line PR you can't — and the usual alternatives either guess, or miss what actually matters.</p>
   <div class="grid g2">
     <div class="card"><div class="ico">🎯</div><h3>Facts, not vibes</h3><p>It reads your code with Python's own parser and reports what's there — it never runs it, and never guesses. Every finding traces to a <code>file:line</code>, so there's nothing to fact-check.</p></div>
-    <div class="card"><div class="ico">🤫</div><h3>Honest about the unknown</h3><p>A tool that wrongly says "all clear" ships the bug. Prism fails toward <i>look here</i> — ✓ / ⚠ / ? — and never renders "didn't see it" as "it's safe."</p></div>
+    <div class="card"><div class="ico">🤫</div><h3>Honest about the unknown</h3><p>A tool that wrongly says "all clear" ships the bug. Pryti fails toward <i>look here</i> — ✓ / ⚠ / ? — and never renders "didn't see it" as "it's safe."</p></div>
     <div class="card"><div class="ico">🔁</div><h3>Refactor-proof</h3><p>Facts are matched on the URL route, not class names. Rename every class in the repo and a pure refactor produces <b>zero</b> noise — so the real change stands out.</p></div>
     <div class="card"><div class="ico">🔒</div><h3>Your rules, enforced</h3><p>It learns the promises your codebase already keeps and flags the PR that breaks one. That confirmed corpus is yours — the piece a competitor can't clone.</p></div>
   </div>
 
   <div style="overflow-x:auto">
   <table class="cmp">
-    <thead><tr><th></th><th>Read the diff</th><th>AI reviewers</th><th>Static scanners</th><th class="col-prism">Prism</th></tr></thead>
+    <thead><tr><th></th><th>Read the diff</th><th>AI reviewers</th><th>Static scanners</th><th class="col-pryti">Pryti</th></tr></thead>
     <tbody>
-      <tr><td>Survives an 18k-line PR</td><td class="n">✗</td><td class="p">~</td><td class="p">~</td><td class="col-prism y">✓</td></tr>
-      <tr><td>No hallucinations</td><td class="y">✓</td><td class="n">✗</td><td class="y">✓</td><td class="col-prism y">✓</td></tr>
-      <tr><td>Honest about what it can't tell</td><td class="p">—</td><td class="n">✗</td><td class="p">~</td><td class="col-prism y">✓</td></tr>
-      <tr><td>Refactor-stable (renames = no noise)</td><td class="n">✗</td><td class="n">✗</td><td class="n">✗</td><td class="col-prism y">✓</td></tr>
-      <tr><td>Learns your team's own rules</td><td class="n">✗</td><td class="n">✗</td><td class="n">✗</td><td class="col-prism y">✓</td></tr>
-      <tr><td>Zero config, zero dependencies</td><td class="y">✓</td><td class="n">✗</td><td class="p">~</td><td class="col-prism y">✓</td></tr>
+      <tr><td>Survives an 18k-line PR</td><td class="n">✗</td><td class="p">~</td><td class="p">~</td><td class="col-pryti y">✓</td></tr>
+      <tr><td>No hallucinations</td><td class="y">✓</td><td class="n">✗</td><td class="y">✓</td><td class="col-pryti y">✓</td></tr>
+      <tr><td>Honest about what it can't tell</td><td class="p">—</td><td class="n">✗</td><td class="p">~</td><td class="col-pryti y">✓</td></tr>
+      <tr><td>Refactor-stable (renames = no noise)</td><td class="n">✗</td><td class="n">✗</td><td class="n">✗</td><td class="col-pryti y">✓</td></tr>
+      <tr><td>Learns your team's own rules</td><td class="n">✗</td><td class="n">✗</td><td class="n">✗</td><td class="col-pryti y">✓</td></tr>
+      <tr><td>Zero config, zero dependencies</td><td class="y">✓</td><td class="n">✗</td><td class="p">~</td><td class="col-pryti y">✓</td></tr>
     </tbody>
   </table>
   </div>
@@ -256,19 +256,19 @@
   <h2>Terminal, a web UI, or on every PR</h2>
   <p class="lead">Same facts, three surfaces — pick whatever fits your workflow.</p>
   <div class="grid g3">
-    <div class="card"><div class="ico">⌨️</div><h3>CLI</h3><p><code>prism review</code> — a ranked review right in your terminal or CI logs.</p></div>
-    <div class="card"><div class="ico">🖥️</div><h3>Web UI</h3><p><code>prism serve</code> — an interactive flow graph and where-to-look, in your browser.</p></div>
+    <div class="card"><div class="ico">⌨️</div><h3>CLI</h3><p><code>pryti review</code> — a ranked review right in your terminal or CI logs.</p></div>
+    <div class="card"><div class="ico">🖥️</div><h3>Web UI</h3><p><code>pryti serve</code> — an interactive flow graph and where-to-look, in your browser.</p></div>
     <div class="card"><div class="ico">🤖</div><h3>GitHub Action</h3><p>A sticky comment, inline notes, and an optional merge gate on every pull request.</p></div>
   </div>
-  <div class="shot" style="margin-top:22px"><img src="images/00-welcome.png" alt="The Prism web UI"></div>
+  <div class="shot" style="margin-top:22px"><img src="images/00-welcome.png" alt="The Pryti web UI"></div>
 </div></section>
 
 <!-- moat -->
 <section id="moat"><div class="wrap">
   <div class="eyebrow">The moat</div>
   <h2>It learns the rules your code already follows</h2>
-  <p class="lead">A property your codebase kept for 800 commits was almost certainly on purpose. Prism mines your git history, surfaces those rules, you confirm the real ones — and then every PR that breaks one gets flagged, with the exact commit that broke it.</p>
-  <div class="shot"><img src="images/02-invariants.png" alt="Prism invariants: discover, confirm, and blame rules"></div>
+  <p class="lead">A property your codebase kept for 800 commits was almost certainly on purpose. Pryti mines your git history, surfaces those rules, you confirm the real ones — and then every PR that breaks one gets flagged, with the exact commit that broke it.</p>
+  <div class="shot"><img src="images/02-invariants.png" alt="Pryti invariants: discover, confirm, and blame rules"></div>
 </div></section>
 
 <!-- features -->
@@ -281,7 +281,7 @@
     <div class="card"><div class="ico">🎭</div><h3>Intent vs. behavior</h3><p>PR says "just a refactor" but added an endpoint? Caught — from facts, not an LLM.</p></div>
     <div class="card"><div class="ico">💬</div><h3>Inline PR comments</h3><p>Each finding pinned to the exact changed line, plus a sticky summary and a triage label.</p></div>
     <div class="card"><div class="ico">🛡️</div><h3>SARIF + gating</h3><p>Findings in the Security tab, and an optional merge gate on a broken rule.</p></div>
-    <div class="card"><div class="ico">📊</div><h3>Org roll-up</h3><p><code>prism digest</code> counts the open risky PRs across every repo — one number for leadership.</p></div>
+    <div class="card"><div class="ico">📊</div><h3>Org roll-up</h3><p><code>pryti digest</code> counts the open risky PRs across every repo — one number for leadership.</p></div>
   </div>
 </div></section>
 
@@ -292,11 +292,11 @@
   <div class="faq">
     <details><summary>Won't it be noisy?</summary><p>No — it's a <b>diff</b>. It only speaks up about what a PR actually changed, and it labels anything uncertain "look here," never "safe." Roll it out in observe mode and you'll see the signal before it can ever block a merge.</p></details>
     <details><summary>Does it need setup or config?</summary><p>Nothing. It's a pure-Python-standard-library package with <b>zero third-party dependencies</b>. Point it at a repo (local path or GitHub URL) and go — no config file, no server, no account.</p></details>
-    <details><summary>Will it hallucinate like an AI reviewer?</summary><p>No. There's no LLM in the analysis — so there's nothing to hallucinate, no API key to wire up, and no per-PR token bill. It reads your code with Python's parser and reports <b>facts</b>; every finding traces to an exact <code>file:line</code>, and the same PR always produces the same review. That's the whole point: LLM reviewers are smart but drift and cost tokens; Prism is deterministic and free.</p></details>
+    <details><summary>Will it hallucinate like an AI reviewer?</summary><p>No. There's no LLM in the analysis — so there's nothing to hallucinate, no API key to wire up, and no per-PR token bill. It reads your code with Python's parser and reports <b>facts</b>; every finding traces to an exact <code>file:line</code>, and the same PR always produces the same review. That's the whole point: LLM reviewers are smart but drift and cost tokens; Pryti is deterministic and free.</p></details>
     <details><summary>Does it run my code?</summary><p>Never. It reads code statically and analyzes clean git snapshots (via <code>git archive</code>) in a temp folder — it doesn't execute anything or touch your working tree. Safe to point at any repo.</p></details>
     <details><summary>What about repos that aren't Django / DRF?</summary><p>Its lens is endpoint-centric (Django &amp; Django REST Framework today). On a repo it can't read, it simply finds nothing to report — it won't invent false alarms. More frameworks (FastAPI, …) are on the roadmap.</p></details>
     <details><summary>Do I need GitHub Advanced Security?</summary><p>No. The review, PR comments, labels, gating, and the org roll-up all work without it. GHAS only powers the optional SARIF Security-tab dashboard.</p></details>
-    <details><summary>Is it free?</summary><p>Yes — under the <a href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/LICENSE">Elastic License 2.0</a>: free to use, self-host, and modify. You just can't resell it as a hosted service.</p></details>
+    <details><summary>Is it free?</summary><p>Yes — under the <a href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer/blob/main/LICENSE">Elastic License 2.0</a>: free to use, self-host, and modify. You just can't resell it as a hosted service.</p></details>
   </div>
 </div></section>
 
@@ -306,24 +306,24 @@
   <h2>Three commands, zero setup</h2>
   <p class="lead">Needs Python 3.8+, plus <code>git</code> and <code>tar</code>. That's the whole install.</p>
   <div class="steps">
-    <div class="step"><div class="num">1</div><div class="body"><h3>Install it</h3><pre>pip install prism-semantic-reviewer</pre></div></div>
-    <div class="step"><div class="num">2</div><div class="body"><h3>Review a pull request</h3><pre>prism review https://github.com/owner/repo --pr 481</pre></div></div>
-    <div class="step"><div class="num">3</div><div class="body"><h3>Or explore it in your browser</h3><pre>cd your-repo &amp;&amp; prism serve</pre></div></div>
+    <div class="step"><div class="num">1</div><div class="body"><h3>Install it</h3><pre>pip install pryti-semantic-reviewer</pre></div></div>
+    <div class="step"><div class="num">2</div><div class="body"><h3>Review a pull request</h3><pre>pryti review https://github.com/owner/repo --pr 481</pre></div></div>
+    <div class="step"><div class="num">3</div><div class="body"><h3>Or explore it in your browser</h3><pre>cd your-repo &amp;&amp; pryti serve</pre></div></div>
   </div>
   <div class="cta" style="margin-top:30px">
-    <a class="btn primary" href="https://pypi.org/project/prism-semantic-reviewer/">Install from PyPI</a>
-    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer#github-action">Add the GitHub Action</a>
-    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/blog/prism-complete-guide.md">Read the guide</a>
+    <a class="btn primary" href="https://pypi.org/project/pryti-semantic-reviewer/">Install from PyPI</a>
+    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer#github-action">Add the GitHub Action</a>
+    <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer/blob/main/blog/pryti-complete-guide.md">Read the guide</a>
   </div>
 </div></section>
 
 <footer><div class="wrap">
-  <div>◭ <b>Prism</b> — the product is the gap between what your code does and what you said it should.</div>
+  <div>✦ <b>Pryti</b> — the product is the gap between what your code does and what you said it should.</div>
   <div>
-    <a href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">GitHub</a> ·
-    <a href="https://pypi.org/project/prism-semantic-reviewer/">PyPI</a> ·
-    <a href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/blog/prism-complete-guide.md">Docs</a> ·
-    <a href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer/blob/main/LICENSE">Elastic License 2.0</a>
+    <a href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer">GitHub</a> ·
+    <a href="https://pypi.org/project/pryti-semantic-reviewer/">PyPI</a> ·
+    <a href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer/blob/main/blog/pryti-complete-guide.md">Docs</a> ·
+    <a href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer/blob/main/LICENSE">Elastic License 2.0</a>
   </div>
 </div></footer>
 

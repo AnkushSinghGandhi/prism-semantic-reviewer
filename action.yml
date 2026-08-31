@@ -1,4 +1,4 @@
-name: 'Prism Semantic Review'
+name: 'Pryti Semantic Review'
 description: 'Semantic diff of a PR — what changed, where to look, and whether it breaks your rules'
 branding:
   icon: 'shield'
@@ -24,7 +24,7 @@ inputs:
     required: false
     default: 'true'
   label:
-    description: 'Apply one prism:* triage label for the PR top severity (true/false; needs issues: write)'
+    description: 'Apply one pryti:* triage label for the PR top severity (true/false; needs issues: write)'
     required: false
     default: 'true'
   scan_deps:
@@ -50,17 +50,17 @@ runs:
       with:
         python-version: '3.11'
 
-    - name: Install Prism
+    - name: Install Pryti
       shell: bash
-      run: pip install "prism-semantic-reviewer>=0.1.3"
+      run: pip install "pryti-semantic-reviewer>=0.1.3"
 
-    - name: Run Prism review
+    - name: Run Pryti review
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github_token }}
-        PRISM_SCAN_DEPS: ${{ inputs.scan_deps == 'false' && '0' || '1' }}
+        PRYTI_SCAN_DEPS: ${{ inputs.scan_deps == 'false' && '0' || '1' }}
       run: |
-        CMD="prism review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md --json pr_review.json --sarif pr_review.sarif"
+        CMD="pryti review ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY} --pr ${{ github.event.pull_request.number }} --out pr_review.md --json pr_review.json --sarif pr_review.sarif"
         if [ -n "${{ inputs.invariants }}" ]; then CMD="$CMD --invariants ${{ inputs.invariants }}"; fi
         if [ "${{ inputs.fail_on }}" != "none" ]; then CMD="$CMD --fail-on ${{ inputs.fail_on }}"; fi
         echo "$CMD"; eval "$CMD"
@@ -72,7 +72,7 @@ runs:
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: pr_review.sarif
-        category: prism
+        category: pryti
 
     - name: Post sticky PR comment
       if: ${{ always() && inputs.comment == 'true' && hashFiles('pr_review.md') != '' }}

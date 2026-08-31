@@ -1,8 +1,8 @@
-# Prism Semantic Reviewer
+# Pryti Semantic Reviewer
 
-**Git tells you what *lines* changed. Prism tells you what those changes *mean*.**
+**Git tells you what *lines* changed. Pryti tells you what those changes *mean*.**
 
-Prism reads a Python web codebase and, for any pull request, commit, or branch, turns a huge diff
+Pryti reads a Python web codebase and, for any pull request, commit, or branch, turns a huge diff
 into a short, ranked list of the things that actually matter: new endpoints, new database writes,
 new external calls, and data that now leaves the system. It cuts through refactor noise and points
 you at the exact lines that matter — and it's honest about what it couldn't resolve.
@@ -11,12 +11,12 @@ Also: **traced PII leaks** (the exact field → where it leaves), **dependency b
 powers** (network/subprocess/native), PR **descriptions that contradict the code**, and the **rules
 your codebase follows** (discover, confirm, enforce, and blame the commit that broke one). Outputs to
 the terminal, a web UI, JSON, HTML, **SARIF**, inline PR comments, a triage label, and a Mermaid
-diagram. Full walkthrough: **The Complete Guide** in the repo (`blog/prism-complete-guide.md`).
+diagram. Full walkthrough: **The Complete Guide** in the repo (`blog/pryti-complete-guide.md`).
 
 ## Install
 
 ```bash
-pip install prism-semantic-reviewer
+pip install pryti-semantic-reviewer
 ```
 
 Zero third-party dependencies. Needs Python 3.8+, plus `git` and `tar` on the PATH.
@@ -25,42 +25,42 @@ Zero third-party dependencies. Needs Python 3.8+, plus `git` and `tar` on the PA
 
 The repo argument can be a **local path** or a **GitHub URL** (URLs are cloned & cached).
 
-### `prism review` — review a PR, commit, or range
+### `pryti review` — review a PR, commit, or range
 
 ```bash
-prism review https://github.com/owner/repo --pr 481      # a GitHub PR by number
-prism review /path/to/repo --commit 9cca6d24             # a single commit (vs its parent)
-prism review /path/to/repo --merge <merge-sha>           # a merge commit
-prism review /path/to/repo --base master --head feature  # any two refs / commits
+pryti review https://github.com/owner/repo --pr 481      # a GitHub PR by number
+pryti review /path/to/repo --commit 9cca6d24             # a single commit (vs its parent)
+pryti review /path/to/repo --merge <merge-sha>           # a merge commit
+pryti review /path/to/repo --base master --head feature  # any two refs / commits
 ```
 
 Output formats and CI gating:
 
 ```bash
-prism review <repo> --pr 481 \
+pryti review <repo> --pr 481 \
     --out review.md \                     # Markdown (default; used by CI to post a PR comment)
     --json review.json --html review.html # structured JSON + a self-contained clickable report
 
-prism review <repo> --pr 481 \
-    --invariants prism-invariants.json \  # enforce your confirmed rules
+pryti review <repo> --pr 481 \
+    --invariants pryti-invariants.json \  # enforce your confirmed rules
     --fail-on violation                   # exit non-zero on a new violation (or: crit)
 ```
 
 Set `GITHUB_TOKEN` for private repos / to avoid GitHub API rate limits.
 
-### `prism post` — put a review on a GitHub PR
+### `pryti post` — put a review on a GitHub PR
 
 ```bash
-prism post 481 review.md --json review.json --inline --label
+pryti post 481 review.md --json review.json --inline --label
 ```
 
-Posts a sticky summary comment, inline comments pinned to the exact changed lines, and one `prism:*`
+Posts a sticky summary comment, inline comments pinned to the exact changed lines, and one `pryti:*`
 triage label. Needs `GITHUB_TOKEN` + the `gh` CLI (present on GitHub runners).
 
-### `prism serve` — interactive web UI (with graph view)
+### `pryti serve` — interactive web UI (with graph view)
 
 ```bash
-cd /path/to/repo && prism serve      # auto-selects the current git repo, opens a browser
+cd /path/to/repo && pryti serve      # auto-selects the current git repo, opens a browser
 ```
 
 In the UI: paste a **GitHub PR link**, or type a **PR #**, **commit sha**, or **base + head**, or
@@ -70,33 +70,33 @@ In the UI: paste a **GitHub PR link**, or type a **PR #**, **commit sha**, or **
 Preload a review straight from the command line:
 
 ```bash
-prism serve --pr 481          # open a PR on load
-prism serve --commit <sha>    # open a commit's diff on load
-prism serve --base A --head B # open a range
+pryti serve --pr 481          # open a PR on load
+pryti serve --commit <sha>    # open a commit's diff on load
+pryti serve --base A --head B # open a range
 ```
 
 Options: `--repo <path-or-url>` · `--port 8765` · `--invariants <file>` · `--no-open`.
 
-### `prism invariants` — discover rules from git history
+### `pryti invariants` — discover rules from git history
 
 ```bash
-prism invariants /path/to/repo --snapshots 10
+pryti invariants /path/to/repo --snapshots 10
 ```
 
 Ranks properties by how long they've held across history, writing `invariants_report.md` and
-`invariants.discovered.json`. Confirm the ones you want and feed them to `prism review --invariants`.
+`invariants.discovered.json`. Confirm the ones you want and feed them to `pryti review --invariants`.
 
-Or **bootstrap every repo at once**: `prism invariants <repo> --bootstrap --baseline org-baseline.json`
+Or **bootstrap every repo at once**: `pryti invariants <repo> --bootstrap --baseline org-baseline.json`
 auto-confirms the safe rules and freezes today's state, so it only flags *new* violations — turning
 the moat on across many repos with no hand-confirming.
 
-### `prism digest` — org-wide roll-up for leadership
+### `pryti digest` — org-wide roll-up for leadership
 
 ```bash
-prism digest --org my-org --slack "$SLACK_WEBHOOK"
+pryti digest --org my-org --slack "$SLACK_WEBHOOK"
 ```
 
-Counts the **open** PRs across a whole org by the `prism:*` triage label Prism already applied —
+Counts the **open** PRs across a whole org by the `pryti:*` triage label Pryti already applied —
 🔴 security / 🟠 money / 🟡 new write. No re-analysis, and **no GitHub Advanced Security** needed.
 Needs a `GITHUB_TOKEN` with org read access.
 
@@ -114,17 +114,17 @@ something it didn't actually trace.
 ## GitHub Action
 
 ```yaml
-# .github/workflows/prism.yml
-name: Prism
+# .github/workflows/pryti.yml
+name: Pryti
 on: { pull_request: {} }
 permissions: { contents: read, pull-requests: write }
 jobs:
-  prism:
+  pryti:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: AnkushSinghGandhi/prism@v1
+      - uses: AnkushSinghGandhi/pryti-semantic-reviewer@v1
         with:
           fail_on: violation   # violation | crit | none
 ```
@@ -134,7 +134,7 @@ Inputs include `fail_on`, `invariants`, `comment`, `inline`, `label`, `scan_deps
 skipped and the check stays green).
 
 Full documentation, the graph UI, and architecture details:
-[GitHub repository](https://github.com/AnkushSinghGandhi/prism).
+[GitHub repository](https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer).
 
 ## License
 

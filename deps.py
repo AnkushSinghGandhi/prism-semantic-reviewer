@@ -225,14 +225,14 @@ def pypi_source_provider(name, version, timeout=8):
     dest = None
     try:
         api = f"https://pypi.org/pypi/{name}/{version}/json"
-        req = urllib.request.Request(api, headers={"User-Agent": "prism-deps"})
+        req = urllib.request.Request(api, headers={"User-Agent": "pryti-deps"})
         data = json.load(urllib.request.urlopen(req, timeout=timeout))
         url = _pick_dist(data.get("urls", []))
         if url:
             blob = urllib.request.urlopen(
-                urllib.request.Request(url, headers={"User-Agent": "prism-deps"}),
+                urllib.request.Request(url, headers={"User-Agent": "pryti-deps"}),
                 timeout=timeout).read()
-            dest = tempfile.mkdtemp(prefix="prism-dep-")
+            dest = tempfile.mkdtemp(prefix="pryti-dep-")
             _extract(url, blob, dest)
     except Exception:
         dest = None

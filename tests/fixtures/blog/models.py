@@ -15,5 +15,5 @@ class OrderItem(models.Model):
 
     @staticmethod
     def insert_ordered_item(**kwargs):
-        # a DB write hidden inside a model helper — Prism should find this via one-hop follow
+        # a DB write hidden inside a model helper — Pryti should find this via one-hop follow
         OrderItem.objects.create(**kwargs)

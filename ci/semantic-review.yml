@@ -50,7 +50,7 @@ jobs:
         if: always()               # publish findings even when the gate below fails
         with:
           sarif_file: pr_review.sarif
-          category: prism
+          category: pryti
 
       - name: Post sticky PR comment
         env:

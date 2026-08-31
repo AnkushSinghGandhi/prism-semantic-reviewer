@@ -1,4 +1,4 @@
-"""prism digest — offline unit tests. The GitHub reads are injected, so no network."""
+"""pryti digest — offline unit tests. The GitHub reads are injected, so no network."""
 from urllib.parse import quote
 
 import digest

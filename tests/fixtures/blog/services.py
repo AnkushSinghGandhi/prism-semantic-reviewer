@@ -4,7 +4,7 @@ from django.conf import settings
 
 class PaymentService:
     def charge(self, amount):
-        # an external call hidden inside a service — Prism should find this via one-hop follow,
+        # an external call hidden inside a service — Pryti should find this via one-hop follow,
         # and resolve the destination to the settings name (not a literal host).
         return requests.post(settings.PAYMENT_URL, data={"amount": amount}, timeout=10)
 
