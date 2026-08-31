@@ -170,8 +170,9 @@
   <div class="logo">✦ <span>pryti-semantic-reviewer</span></div>
   <div class="links">
     <a href="#how">How it works</a>
+    <a href="#ecosystem">Ecosystem</a>
     <a href="#lens">The lens</a>
-    <a href="#moat">The moat</a>
+    <a href="docs.html">Docs</a>
     <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer">GitHub</a>
   </div>
 </div></nav>
@@ -180,6 +181,7 @@
   <div class="mark">✦</div>
   <div class="eyebrow" style="text-transform:none;font-size:15px;letter-spacing:0;margin-bottom:2px">pryti-semantic-reviewer</div>
   <h1>See what a pull request <em>actually</em> changes — <em>no LLM required</em></h1>
+  <p class="sub" style="font-size:14px;margin-top:10px"><b style="color:var(--accent)">PRYTI</b> — Pull Request Review, Yield &amp; Technical Intelligence</p>
   <p class="sub">Git tells you what <b>lines</b> changed. Pryti tells you what they <b>mean</b> — and points you at the exact line to read.</p>
   <p class="one">A <b>deterministic</b> semantic PR reviewer for Python web apps. No AI black box, no API key, no per-PR token bill — same PR in, same review out, every time.</p>
   <div class="pills" style="justify-content:center">
@@ -208,6 +210,35 @@
     <a href="https://warriorwhocodes.com">warriorwhocodes.com</a>
   </div>
 </div></header>
+
+<!-- ecosystem -->
+<section id="ecosystem"><div class="wrap">
+  <div class="eyebrow">The ecosystem</div>
+  <h2>Two tools, one promise: always know what your backend does</h2>
+  <p class="lead">Pryti looks at your backend from both sides — the <b>diff</b> from the outside and the <b>running app</b> from the inside. Each catches what the other structurally can't.</p>
+
+  <div class="grid g2">
+    <div class="card">
+      <div class="ico">🔎</div>
+      <h3>pryti-semantic-reviewer</h3>
+      <p><b>Outside-in.</b> A GitHub Action / CLI that reads the PR diff (AST, no LLM) and comments on what actually changed and where to look. Lives in your <b>CI</b> — zero code, zero setup.</p>
+      <p style="margin-top:10px"><code>pip install pryti-semantic-reviewer</code></p>
+    </div>
+    <div class="card">
+      <div class="ico">🛡️</div>
+      <h3>pryti-contract</h3>
+      <p><b>Inside-out.</b> A library <b>inside your Django app</b> that records what it really does — routes, models, effects — fails CI on a risky change, and blocks undeclared calls at runtime.</p>
+      <p style="margin-top:10px"><code>pip install pryti-contract</code></p>
+    </div>
+  </div>
+
+  <div class="term" style="margin-top:26px">
+    <div class="bar">◭ the bridge — runtime <i>truth</i> feeds the reviewer</div>
+    <pre>$ pryti-contract invariants -o invariants.json        <span class="muted"># the app's real declared egress + rules</span>
+$ pryti review &lt;repo&gt; --pr 128 --invariants invariants.json   <span class="muted"># the reviewer stops guessing</span></pre>
+  </div>
+  <p class="lead" style="margin-top:16px">On its own the reviewer <i>guesses</i> your invariants from git history. <b>pryti-contract</b> hands it the truth instead: your app's declared destinations become an <b>enforced allowlist</b>, so a brand-new domain sneaking into a PR is a <span class="c-crit">🔴 critical</span> alert — grounded in fact, not a hunch. <a href="docs.html">See the full docs →</a></p>
+</div></section>
 
 <!-- problem -->
 <section id="how"><div class="wrap">

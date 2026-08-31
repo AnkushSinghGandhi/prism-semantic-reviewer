@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Docs — Pryti (reviewer + contract): every command, flag & CI recipe</title>
+<meta name="description" content="Full documentation for the Pryti ecosystem: pryti-semantic-reviewer and pryti-contract. Every CLI command, flag, GitHub Action input, decorator, and CI example.">
+<link rel="canonical" href="https://warriorwhocodes.com/pryti-semantic-reviewer/docs.html">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✦</text></svg>">
+<style>
+  :root{--bg:#0b0e14;--panel:#131823;--panel2:#0f141d;--line:#232a38;--text:#e6edf3;
+        --muted:#93a1b0;--accent:#a855f7;--accent2:#7c3aed;--crit:#f85149;--low:#3fb950;--cyan:#58a6ff;--yellow:#e3b341}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font:15.5px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  code,pre{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+  .spectrum{height:4px;background:linear-gradient(90deg,#f85149,#f0883e,#e3b341,#3fb950,#58a6ff,#a855f7)}
+  nav{position:sticky;top:0;z-index:20;background:rgba(11,14,20,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  nav .in{max-width:1180px;margin:0 auto;padding:0 24px;height:58px;display:flex;align-items:center;justify-content:space-between}
+  nav .logo{font-weight:700;font-size:19px}nav .logo span{color:var(--accent)}
+  nav .links a{color:var(--muted);margin-left:20px;font-size:14px}nav .links a:hover{color:var(--text);text-decoration:none}
+  .layout{max-width:1180px;margin:0 auto;padding:0 24px;display:grid;grid-template-columns:230px 1fr;gap:40px}
+  aside{position:sticky;top:58px;align-self:start;height:calc(100vh - 58px);overflow:auto;padding:28px 0}
+  aside h4{color:var(--muted);text-transform:uppercase;font-size:11px;letter-spacing:1.2px;margin:18px 0 8px}
+  aside a{display:block;color:var(--muted);font-size:14px;padding:4px 0}
+  aside a:hover{color:var(--text);text-decoration:none}
+  main{padding:34px 0 90px;min-width:0}
+  h1{font-size:34px;letter-spacing:-.4px;margin-bottom:6px}
+  .sub{color:var(--muted);font-size:17px;margin-bottom:8px}
+  h2{font-size:24px;margin:44px 0 6px;padding-top:12px;border-top:1px solid var(--line);letter-spacing:-.2px}
+  h2:first-of-type{border-top:none}
+  h3{font-size:18px;margin:26px 0 8px}
+  h4.cmd{font-size:15px;margin:20px 0 6px;color:var(--cyan);font-family:"SF Mono",monospace}
+  p{color:var(--muted);margin:8px 0}
+  p b,li b,td b{color:var(--text)}
+  ul{margin:8px 0 8px 20px;color:var(--muted)}li{margin:4px 0}
+  code{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;font-size:13px;color:#a5d6ff}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:15px 18px;overflow:auto;margin:12px 0;font-size:13px;line-height:1.6;color:#c9d1d9}
+  pre code{background:none;border:none;padding:0;color:inherit}
+  .muted{color:var(--muted)}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12.5px;text-transform:uppercase;letter-spacing:.5px}
+  td:first-child{white-space:nowrap}
+  td code{font-size:12.5px}
+  .pill{display:inline-block;border:1px solid var(--line);border-radius:6px;padding:2px 9px;font-size:12px;color:var(--muted);margin-left:8px}
+  .note{background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);border-radius:10px;padding:14px 16px;margin:16px 0;color:var(--text);font-size:14.5px}
+  .note b{color:var(--accent)}
+  .c-crit{color:var(--crit)}.c-low{color:var(--low)}
+  @media(max-width:820px){.layout{grid-template-columns:1fr}aside{display:none}}
+</style>
+</head>
+<body>
+<div class="spectrum"></div>
+<nav><div class="in">
+  <div class="logo">✦ <span>Pryti</span> docs</div>
+  <div class="links">
+    <a href="index.html">← Home</a>
+    <a href="#reviewer">Reviewer</a>
+    <a href="#contract">Contract</a>
+    <a href="#bridge">Bridge</a>
+    <a href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer">GitHub</a>
+  </div>
+</div></nav>
+
+<div class="layout">
+<aside>
+  <h4>Start</h4>
+  <a href="#install">Install</a>
+  <a href="#concepts">Concepts</a>
+  <h4>Reviewer</h4>
+  <a href="#reviewer">Overview</a>
+  <a href="#r-review">pryti review</a>
+  <a href="#r-post">pryti post</a>
+  <a href="#r-serve">pryti serve</a>
+  <a href="#r-invariants">pryti invariants</a>
+  <a href="#r-digest">pryti digest</a>
+  <a href="#r-action">GitHub Action</a>
+  <h4>Contract</h4>
+  <a href="#contract">Overview</a>
+  <a href="#c-decorators">Decorators</a>
+  <a href="#c-guard">Guard &amp; middleware</a>
+  <a href="#c-export">export</a>
+  <a href="#c-diff">diff</a>
+  <a href="#c-invariants">invariants</a>
+  <a href="#c-suggest">suggest</a>
+  <h4>Together</h4>
+  <a href="#bridge">The bridge</a>
+  <a href="#ci">Full CI</a>
+</aside>
+
+<main>
+  <h1>Pryti documentation</h1>
+  <p class="sub">Two packages. Every command, flag, and CI recipe in one place.</p>
+  <p><b>PRYTI</b> — Pull Request Review, Yield &amp; Technical Intelligence.</p>
+
+  <h2 id="install">Install</h2>
+  <table>
+    <tr><th>Package</th><th>Install</th><th>Where it runs</th></tr>
+    <tr><td><b>pryti-semantic-reviewer</b></td><td><code>pip install pryti-semantic-reviewer</code></td><td>Your CI (a GitHub Action / CLI). Never imported by your app.</td></tr>
+    <tr><td><b>pryti-contract</b></td><td><code>pip install pryti-contract</code></td><td>Inside your Django app (a real dependency).</td></tr>
+  </table>
+  <p>The reviewer needs Python 3.8+, plus <code>git</code> and <code>tar</code>. The contract needs Python 3.10+ and, for the Django features, <code>django&gt;=4.2</code>.</p>
+
+  <h2 id="concepts">Two vantage points</h2>
+  <table>
+    <tr><th></th><th>pryti-semantic-reviewer</th><th>pryti-contract</th></tr>
+    <tr><td><b>Sees</b></td><td>the PR diff, statically (AST)</td><td>the real app at startup + runtime</td></tr>
+    <tr><td><b>Output</b></td><td>a comment on the PR</td><td>fails CI (diff) + blocks calls (guard)</td></tr>
+    <tr><td><b>Setup</b></td><td>none — add the Action</td><td>export in CI + optional middleware</td></tr>
+    <tr><td><b>Imported?</b></td><td>no — it's a tool</td><td>yes — decorators + middleware</td></tr>
+  </table>
+
+  <!-- ============================ REVIEWER ============================ -->
+  <h2 id="reviewer">🔎 pryti-semantic-reviewer</h2>
+  <p>A semantic PR reviewer for Python web apps. It reads the diff, tells you what it <i>means</i> and where to look, and can enforce a confirmed invariant corpus — <b>no LLM</b>, no API key. CLI entrypoint: <code>pryti</code>.</p>
+
+  <h4 class="cmd" id="r-review">pryti review</h4>
+  <p>Run a semantic review of a PR or commit range. With no <code>repo</code>, it reviews the current git repo's branch vs. its default branch.</p>
+  <pre><code>pryti review &lt;repo|url&gt; --pr 128 --out pr_review.md --json pr_review.json --sarif pr_review.sarif</code></pre>
+  <table>
+    <tr><th>Flag</th><th>What it does</th></tr>
+    <tr><td><code>repo</code></td><td>Positional. Local path or git URL. Defaults to the current git repo.</td></tr>
+    <tr><td><code>--pr N</code></td><td>Review a GitHub PR by number (needs a GitHub URL repo).</td></tr>
+    <tr><td><code>--commit SHA</code></td><td>Review a single commit (its diff vs its parent).</td></tr>
+    <tr><td><code>--merge SHA</code></td><td>Review a merge commit (base <code>^1</code>, head <code>^2</code>).</td></tr>
+    <tr><td><code>--base / --head</code></td><td>Explicit <code>base..head</code> range.</td></tr>
+    <tr><td><code>--out FILE</code></td><td>Markdown review. Default <code>pr_review.md</code>.</td></tr>
+    <tr><td><code>--json FILE</code></td><td>Structured review JSON (drives inline comments + labels).</td></tr>
+    <tr><td><code>--html FILE</code></td><td>Self-contained HTML viewer.</td></tr>
+    <tr><td><code>--sarif FILE</code></td><td>SARIF 2.1.0 for GitHub code scanning.</td></tr>
+    <tr><td><code>--invariants FILE</code></td><td>Confirmed invariant corpus JSON to enforce (see <a href="#bridge">the bridge</a>).</td></tr>
+    <tr><td><code>--fail-on {violation,crit}</code></td><td>Exit non-zero on 🔴 invariant violations (<code>violation</code>) or any 🔴 (<code>crit</code>).</td></tr>
+  </table>
+
+  <h4 class="cmd" id="r-post">pryti post</h4>
+  <p>Post a review to a PR — a sticky summary comment, optional inline comments, and one triage label.</p>
+  <pre><code>pryti post 128 pr_review.md --json pr_review.json --inline --label</code></pre>
+  <table>
+    <tr><th>Arg</th><th>What it does</th></tr>
+    <tr><td><code>pr file</code></td><td>Positional: the PR number and the markdown review file.</td></tr>
+    <tr><td><code>--json FILE</code></td><td>The review JSON (required for <code>--inline</code> / <code>--label</code>).</td></tr>
+    <tr><td><code>--inline</code></td><td>Pin each finding as an inline comment on the exact changed line.</td></tr>
+    <tr><td><code>--label</code></td><td>Apply one <code>pryti:*</code> triage label for the PR's top severity.</td></tr>
+  </table>
+
+  <h4 class="cmd" id="r-serve">pryti serve</h4>
+  <p>Start the Pryti web UI to explore a repo/PR in the browser.</p>
+  <pre><code>cd your-repo &amp;&amp; pryti serve --port 8765</code></pre>
+  <table>
+    <tr><th>Flag / env</th><th>What it does</th></tr>
+    <tr><td><code>--repo</code> · <code>PRYTI_DEFAULT_REPO</code></td><td>Repo to open.</td></tr>
+    <tr><td><code>--invariants</code> · <code>PRYTI_INVARIANTS</code></td><td>Invariant corpus to enforce in the UI.</td></tr>
+    <tr><td><code>--host</code> · <code>HOST</code></td><td>Bind host. Default <code>0.0.0.0</code>.</td></tr>
+    <tr><td><code>--port</code> · <code>PORT</code></td><td>Bind port. Default <code>8765</code>.</td></tr>
+    <tr><td><code>--pr / --commit / --merge / --base / --head</code></td><td>Open this target on load.</td></tr>
+    <tr><td><code>--no-open</code></td><td>Don't open a browser window.</td></tr>
+    <tr><td><code>PRYTI_TOKEN</code> · <code>PRYTI_ALLOWED_REPOS</code> · <code>PRYTI_BASE_PATH</code></td><td>Auth token, repo allowlist, and base path when hosting the UI.</td></tr>
+  </table>
+
+  <h4 class="cmd" id="r-invariants">pryti invariants</h4>
+  <p>Discover <i>candidate</i> invariants from a repo's history (ranked by how persistently they held), for a human to confirm into a corpus. <span class="pill">the reviewer's own discovery — see also <a href="#c-invariants">pryti-contract invariants</a></span></p>
+  <pre><code>pryti invariants &lt;repo&gt; --snapshots 40 --out invariants.discovered.json</code></pre>
+  <table>
+    <tr><td><code>repo</code></td><td>Repo to sample.</td></tr>
+    <tr><td><code>--snapshots N</code></td><td>How many commits across history to sample.</td></tr>
+    <tr><td><code>--out FILE</code></td><td>Discovered corpus. Default <code>invariants.discovered.json</code>.</td></tr>
+  </table>
+
+  <h4 class="cmd" id="r-digest">pryti digest</h4>
+  <p>Org-wide leadership roll-up from the labels Pryti applies to PRs.</p>
+  <pre><code>pryti digest --org my-org --repos repos.txt --slack $SLACK_WEBHOOK</code></pre>
+  <table>
+    <tr><td><code>--org</code></td><td>Required. GitHub org/owner to summarize.</td></tr>
+    <tr><td><code>--repos FILE</code></td><td>Optional file of <code>owner/repo</code> lines → adds an adoption line.</td></tr>
+    <tr><td><code>--slack URL</code></td><td>Slack incoming-webhook to post the digest to.</td></tr>
+  </table>
+
+  <h3 id="r-action">GitHub Action</h3>
+  <p>The zero-setup path. Add it to a <code>pull_request</code> workflow.</p>
+  <pre><code>name: pryti
+on: pull_request
+permissions: { contents: read, pull-requests: write, issues: write }
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: AnkushSinghGandhi/pryti-semantic-reviewer@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          fail_on: crit          # violation | crit | none
+          inline: true
+          label: true</code></pre>
+  <table>
+    <tr><th>Input</th><th>Default</th><th>What it does</th></tr>
+    <tr><td><code>github_token</code></td><td><code>${{ github.token }}</code></td><td>Token for PR data + posting the comment.</td></tr>
+    <tr><td><code>fail_on</code></td><td><code>none</code></td><td><code>violation</code>, <code>crit</code>, or <code>none</code> — when to fail the build.</td></tr>
+    <tr><td><code>invariants</code></td><td>—</td><td>Path to a confirmed invariants JSON to enforce.</td></tr>
+    <tr><td><code>comment</code></td><td><code>true</code></td><td>Post the review as a sticky PR comment.</td></tr>
+    <tr><td><code>inline</code></td><td><code>true</code></td><td>Pin each finding on its exact changed line.</td></tr>
+    <tr><td><code>label</code></td><td><code>true</code></td><td>Apply one <code>pryti:*</code> triage label (needs <code>issues: write</code>).</td></tr>
+    <tr><td><code>scan_deps</code></td><td><code>true</code></td><td>Scan bumped dependencies for new capabilities via PyPI.</td></tr>
+    <tr><td><code>upload_sarif</code></td><td><code>true</code></td><td>Upload SARIF to code scanning (needs GitHub Advanced Security on private repos; set <code>false</code> without it).</td></tr>
+  </table>
+  <p>Outputs: <code>review_markdown</code> (<code>pr_review.md</code>) and <code>review_sarif</code> (<code>pr_review.sarif</code>).</p>
+
+  <!-- ============================ CONTRACT ============================ -->
+  <h2 id="contract">🛡️ pryti-contract</h2>
+  <p>Your Django backend keeps a list of what it does — and can't lie about it. It records routes, models, and effects at runtime, diffs that contract in CI, and blocks undeclared effects while the app runs. CLI entrypoint: <code>pryti-contract</code>.</p>
+
+  <h3 id="c-decorators">Decorators</h3>
+  <p>Optional — Level&nbsp;1 works with zero code. Declare what matters and the guard can enforce it.</p>
+  <pre><code>from pryti_contract import contract
+
+@contract.route("POST /orders", auth="user")     # method + path + who may call it
+@contract.effects("net:api.stripe.com", "email") # every outside call it's allowed to make
+def create_order(request):
+    ...
+
+@contract.job("nightly-invoices", schedule="0 2 * * *")
+@contract.effects("net:api.stripe.com")
+def nightly(): ...</code></pre>
+  <table>
+    <tr><th>Decorator</th><th>What it declares</th></tr>
+    <tr><td><code>@contract.route("METHOD /path", auth=...)</code></td><td>A route and its required auth (<code>public</code>, <code>user</code>, …).</td></tr>
+    <tr><td><code>@contract.effects(*patterns)</code></td><td>Allowed effects. Patterns: <code>net:host</code>, <code>net:*.stripe.com</code>, <code>net:*</code>, <code>email</code>.</td></tr>
+    <tr><td><code>@contract.job("name", schedule=...)</code></td><td>A background job and its (optional) cron schedule.</td></tr>
+  </table>
+
+  <h3 id="c-guard">Guard &amp; middleware</h3>
+  <p>The guard hooks the socket layer once — so <code>requests</code>, <code>httpx</code>, <code>urllib</code>, <code>boto3</code>, <code>smtplib</code> and anything else are all covered. An undeclared call in <code>error</code> mode never leaves the process.</p>
+  <pre><code># settings.py
+MIDDLEWARE = ["pryti_contract.middleware.ContractMiddleware", ...]
+
+# apps.py / conftest.py
+from pryti_contract import guard
+guard.install(mode="error", allow=["net:*.internal"])   # off | record | warn | error</code></pre>
+  <table>
+    <tr><th>Mode</th><th>Behaviour</th></tr>
+    <tr><td><code>off</code></td><td>Do nothing.</td></tr>
+    <tr><td><code>record</code></td><td>Observe only — collect what actually happens (for <code>suggest</code>).</td></tr>
+    <tr><td><code>warn</code></td><td>Warn on an undeclared effect, but allow it.</td></tr>
+    <tr><td><code>error</code></td><td>Raise <code>UndeclaredEffect</code> — the call is blocked.</td></tr>
+  </table>
+  <p>Don't know what to declare? Run tests in <code>record</code> mode, dump <code>guard.suggestions()</code>, and feed it to <a href="#c-suggest"><code>pryti-contract suggest</code></a>.</p>
+
+  <h4 class="cmd" id="c-export">pryti-contract export</h4>
+  <p>Write the contract as JSON. Reads Django's real router + model registry — routes built in loops and DRF routers included.</p>
+  <pre><code>pryti-contract export --settings myproj.settings -o contract.json</code></pre>
+  <table>
+    <tr><td><code>-o, --output FILE</code></td><td>Where to write. Omit to print to stdout.</td></tr>
+    <tr><td><code>--settings MOD</code></td><td><code>DJANGO_SETTINGS_MODULE</code>.</td></tr>
+    <tr><td><code>--root DIR</code></td><td>Project root to put on <code>sys.path</code>. Default <code>.</code></td></tr>
+    <tr><td><code>--import-module MOD</code></td><td>Extra modules to import (repeatable) so their decorators run.</td></tr>
+    <tr><td><code>--no-django</code></td><td>Declarations only; skip Django probing.</td></tr>
+  </table>
+
+  <h4 class="cmd" id="c-diff">pryti-contract diff</h4>
+  <p>Compare two contract files (base vs head) and print what a reviewer cares about. This is the CI gate.</p>
+  <pre><code>pryti-contract diff base.json head.json --markdown --fail-on risky</code></pre>
+  <table>
+    <tr><td><code>base head</code></td><td>Positional: the two contract JSON files.</td></tr>
+    <tr><td><code>--markdown</code></td><td>Format for a PR comment.</td></tr>
+    <tr><td><code>--fail-on {never,risky,review,any}</code></td><td>Exit 1 at this severity. Default <code>never</code>. <code>risky</code> = auth weakening, new egress, dropped fields, relaxed uniqueness.</td></tr>
+  </table>
+
+  <h4 class="cmd" id="c-invariants">pryti-contract invariants</h4>
+  <p>Emit a confirmed-invariant corpus <b>for the reviewer's <code>--invariants</code></b>. This is the bridge — see below.</p>
+  <pre><code>pryti-contract invariants --settings myproj.settings -o invariants.json</code></pre>
+  <table>
+    <tr><td><code>-o, --output FILE</code></td><td>Where to write the corpus.</td></tr>
+    <tr><td><code>--settings / --root / --import-module / --no-django</code></td><td>Same as <code>export</code>.</td></tr>
+  </table>
+
+  <h4 class="cmd" id="c-suggest">pryti-contract suggest</h4>
+  <p>Turn a recorded run into ready-to-paste decorators.</p>
+  <pre><code>pryti-contract suggest observed.json     # prints @contract.effects(...) per handler</code></pre>
+  <table>
+    <tr><td><code>observed</code></td><td>JSON produced by <code>guard.suggestions()</code> after a <code>record</code>-mode run.</td></tr>
+  </table>
+
+  <!-- ============================ BRIDGE ============================ -->
+  <h2 id="bridge">🔗 The bridge: runtime truth → the reviewer</h2>
+  <p>On its own the reviewer <i>guesses</i> your invariants from git history. <code>pryti-contract</code> hands it the truth: your app's <b>declared egress destinations become an enforced allowlist</b>, and its auth/PII rules are confirmed. A brand-new domain sneaking into a PR then becomes a <span class="c-crit">🔴 critical</span> alert — grounded in fact.</p>
+  <pre><code># 1. export the real contract as an invariant corpus (runs your app)
+pryti-contract invariants --settings myproj.settings -o invariants.json
+
+# 2. hand it to the reviewer — it stops guessing, it enforces
+pryti review &lt;repo&gt; --pr 128 --invariants invariants.json --fail-on violation</code></pre>
+  <div class="note"><b>What gets enforced:</b> <code>external-egress-allowlist</code> (your declared <code>net:</code> destinations), <code>auth-before-write</code>, and <code>pii-egress-authed</code> — all marked <code>confirmed</code>, so the reviewer treats them as hard rules, not hunches.</div>
+
+  <h2 id="ci">Full CI — both tools on one PR</h2>
+  <pre><code>name: pr-checks
+on: pull_request
+permissions: { contents: read, pull-requests: write, issues: write }
+
+jobs:
+  # 1) the reviewer — comments on the PR (soft heads-up)
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: AnkushSinghGandhi/pryti-semantic-reviewer@v1
+        with: { github_token: "${{ secrets.GITHUB_TOKEN }}", fail_on: crit }
+
+  # 2) the contract — hard gate on structural change (+ feeds the reviewer)
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: pip install -e . pryti-contract
+      - run: pryti-contract export --settings app.settings -o head.json
+      - run: pryti-contract invariants --settings app.settings -o invariants.json
+      - run: git checkout ${{ github.base_ref }}
+      - run: pryti-contract export --settings app.settings -o base.json
+      - run: pryti-contract diff base.json head.json --markdown --fail-on risky</code></pre>
+  <p>The third catch — the runtime <b>guard</b> — runs in your test/staging job, because it needs the app actually running (<code>guard.install(mode="error")</code>).</p>
+
+  <p style="margin-top:40px"><a href="index.html">← Back to home</a> &nbsp;·&nbsp; <a href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer">Reviewer on GitHub</a> &nbsp;·&nbsp; <a href="https://github.com/AnkushSinghGandhi/pryti-contract">Contract on GitHub</a></p>
+</main>
+</div>
+</body>
+</html>
