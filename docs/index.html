@@ -3,9 +3,48 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pryti — deterministic semantic PR reviewer (no LLM, no API key)</title>
-<meta name="description" content="A deterministic semantic PR reviewer for Python web apps. No LLM, no API key, no per-PR token bill — same PR in, same review out. Git tells you what lines changed; Pryti tells you what they mean and where to look.">
+<title>pryti-semantic-reviewer — deterministic semantic PR reviewer for Python (no LLM, no API key)</title>
+<meta name="description" content="pryti-semantic-reviewer is a deterministic semantic PR reviewer for Python web apps — no LLM, no API key, no per-PR token bill. Git tells you what lines changed; Pryti tells you what they mean and where to look.">
+<meta name="keywords" content="pryti, pryti semantic reviewer, pryti-semantic-reviewer, semantic PR reviewer, deterministic code review, Python PR reviewer, AST code review, no LLM code review, GitHub Action code review">
+<meta name="author" content="Ankush Singh Gandhi">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<link rel="canonical" href="https://warriorwhocodes.com/pryti-semantic-reviewer/">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✦</text></svg>">
+
+<!-- Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="pryti-semantic-reviewer">
+<meta property="og:title" content="pryti-semantic-reviewer — deterministic semantic PR reviewer (no LLM)">
+<meta property="og:description" content="See what a pull request actually changes. A deterministic semantic PR reviewer for Python — no LLM, no API key, no token bill.">
+<meta property="og:url" content="https://warriorwhocodes.com/pryti-semantic-reviewer/">
+<meta property="og:image" content="https://warriorwhocodes.com/pryti-semantic-reviewer/images/00-welcome.png">
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="pryti-semantic-reviewer — deterministic semantic PR reviewer (no LLM)">
+<meta name="twitter:description" content="See what a pull request actually changes. Deterministic, no LLM, no API key.">
+<meta name="twitter:image" content="https://warriorwhocodes.com/pryti-semantic-reviewer/images/00-welcome.png">
+
+<!-- Structured data: helps Google understand the entity "pryti-semantic-reviewer" -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "pryti-semantic-reviewer",
+  "alternateName": "Pryti",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "OS Independent",
+  "description": "A deterministic semantic PR reviewer for Python web apps — no LLM, no API key. Shows what a pull request actually changes and points you at the exact line to read.",
+  "url": "https://warriorwhocodes.com/pryti-semantic-reviewer/",
+  "downloadUrl": "https://pypi.org/project/pryti-semantic-reviewer/",
+  "installUrl": "https://pypi.org/project/pryti-semantic-reviewer/",
+  "softwareVersion": "0.4.0",
+  "codeRepository": "https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer",
+  "license": "https://spdx.org/licenses/Elastic-2.0.html",
+  "author": { "@type": "Person", "name": "Ankush Singh Gandhi", "url": "https://warriorwhocodes.com" },
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
 <style>
   :root{
     --bg:#0b0e14; --panel:#131823; --panel2:#0f141d; --line:#232a38;
@@ -128,7 +167,7 @@
 <div class="spectrum"></div>
 
 <nav><div class="wrap">
-  <div class="logo">✦ <span>Pryti</span></div>
+  <div class="logo">✦ <span>pryti-semantic-reviewer</span></div>
   <div class="links">
     <a href="#how">How it works</a>
     <a href="#lens">The lens</a>
@@ -139,6 +178,7 @@
 
 <header class="hero"><div class="wrap">
   <div class="mark">✦</div>
+  <div class="eyebrow" style="text-transform:none;font-size:15px;letter-spacing:0;margin-bottom:2px">pryti-semantic-reviewer</div>
   <h1>See what a pull request <em>actually</em> changes — <em>no LLM required</em></h1>
   <p class="sub">Git tells you what <b>lines</b> changed. Pryti tells you what they <b>mean</b> — and points you at the exact line to read.</p>
   <p class="one">A <b>deterministic</b> semantic PR reviewer for Python web apps. No AI black box, no API key, no per-PR token bill — same PR in, same review out, every time.</p>
