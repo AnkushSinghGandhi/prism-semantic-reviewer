@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Prism live web service — stdlib only, no dependencies.
+Pryti live web service — stdlib only, no dependencies.
 
 Local:
     python3 serve.py [--repo <default-repo-or-url>] [--invariants <corpus.json>] [--port 8765]
@@ -8,12 +8,12 @@ Local:
 Deployed (e.g. Render) it reads these env vars:
     PORT                 port to bind (Render sets this)                     [default 8765]
     HOST                 interface to bind                                   [default 0.0.0.0]
-    PRISM_TOKEN          if set, /api/* requires ?token=... (lock down public deploys)
-    PRISM_ALLOWED_REPOS  comma-separated substrings; only matching repos may be reviewed
-    PRISM_BASE_PATH      serve under a sub-path, e.g. /prism (behind a reverse proxy)
+    PRYTI_TOKEN          if set, /api/* requires ?token=... (lock down public deploys)
+    PRYTI_ALLOWED_REPOS  comma-separated substrings; only matching repos may be reviewed
+    PRYTI_BASE_PATH      serve under a sub-path, e.g. /pryti (behind a reverse proxy)
     GITHUB_TOKEN         for private repos / GitHub API rate limits
-    PRISM_DEFAULT_REPO   default repo shown in the UI
-    PRISM_INVARIANTS     default invariant corpus path
+    PRYTI_DEFAULT_REPO   default repo shown in the UI
+    PRYTI_INVARIANTS     default invariant corpus path
 """
 import argparse
 import json
@@ -68,7 +68,7 @@ def make_handler(cfg):
         def _authorized(self, g):
             if not cfg["token"]:
                 return True
-            return (g("token") or self.headers.get("X-Prism-Token")) == cfg["token"]
+            return (g("token") or self.headers.get("X-Pryti-Token")) == cfg["token"]
 
         def _repo_ok(self, repo):
             if not cfg["allowed"]:
@@ -85,7 +85,7 @@ def make_handler(cfg):
                 path = path[len(bp):] or "/"
             try:
                 if path in ("/", "/index.html", "/app", "/app.html", ""):
-                    # `prism serve` goes straight to the usage page (the review UI)
+                    # `pryti serve` goes straight to the usage page (the review UI)
                     return self._send(200, open(os.path.join(HERE, "web", "app.html"), "rb").read(),
                                       "text/html; charset=utf-8")
                 if path == "/healthz":
@@ -177,7 +177,7 @@ def make_handler(cfg):
                     corpus_path = cfg["invariants"]
                     if not corpus_path or is_url(corpus_path):
                         return self._json(400, {"error": "confirming needs a local corpus file — "
-                                                "start `prism serve --invariants <path.json>`"})
+                                                "start `pryti serve --invariants <path.json>`"})
                     repo = body.get("repo") or cfg["repo"]
                     if not repo:
                         return self._json(400, {"error": "no repo given"})
@@ -208,10 +208,10 @@ def _norm_repo(r):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Prism web UI. Run inside a git repo to auto-select it.")
-    ap.add_argument("--repo", default=os.environ.get("PRISM_DEFAULT_REPO", ""),
+    ap = argparse.ArgumentParser(description="Pryti web UI. Run inside a git repo to auto-select it.")
+    ap.add_argument("--repo", default=os.environ.get("PRYTI_DEFAULT_REPO", ""),
                     help="repo path or URL (default: the git repo of the current directory)")
-    ap.add_argument("--invariants", default=os.environ.get("PRISM_INVARIANTS", ""))
+    ap.add_argument("--invariants", default=os.environ.get("PRYTI_INVARIANTS", ""))
     ap.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8765")))
     # preload a review straight into the UI:
@@ -232,22 +232,22 @@ def main():
     cfg = {
         "repo": _norm_repo(repo),
         "invariants": _norm_repo(args.invariants),
-        "token": os.environ.get("PRISM_TOKEN", ""),
-        "allowed": [s.strip() for s in os.environ.get("PRISM_ALLOWED_REPOS", "").split(",") if s.strip()],
-        "base_path": os.environ.get("PRISM_BASE_PATH", "").rstrip("/"),
+        "token": os.environ.get("PRYTI_TOKEN", ""),
+        "allowed": [s.strip() for s in os.environ.get("PRYTI_ALLOWED_REPOS", "").split(",") if s.strip()],
+        "base_path": os.environ.get("PRYTI_BASE_PATH", "").rstrip("/"),
         "preload": preload,
     }
     srv = ThreadingHTTPServer((args.host, args.port), make_handler(cfg))
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
     url = f"http://{shown}:{args.port}{cfg['base_path'] or ''}/"
-    print(f"Prism  →  {url}")
+    print(f"Pryti  →  {url}")
     print(f"  repo: {cfg['repo'] or '(enter one in the UI)'}" + ("  [auto-detected]" if not args.repo and cfg['repo'] else ""))
     if preload:
         print(f"  preloading: {preload}")
     if cfg["token"]:
         print("  access:       token required (?token=…)")
     elif args.host == "0.0.0.0":
-        print("  note: bound on 0.0.0.0 with no PRISM_TOKEN — fine locally, set a token if exposed.")
+        print("  note: bound on 0.0.0.0 with no PRYTI_TOKEN — fine locally, set a token if exposed.")
     if cfg["allowed"]:
         print(f"  allowlist:    {cfg['allowed']}")
     if not args.no_open and not os.environ.get("PORT"):   # local run, not a hosted deploy

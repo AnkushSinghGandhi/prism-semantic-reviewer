@@ -516,7 +516,7 @@ def main():
         baseline = json.load(open(args.baseline, encoding="utf-8")) if args.baseline else []
         _, cands = discover(repo, args.snapshots)
         merged = bootstrap_corpus(corpus(cands), baseline)
-        out = args.out if args.out != ap.get_default("out") else "prism-invariants.json"
+        out = args.out if args.out != ap.get_default("out") else "pryti-invariants.json"
         json.dump(merged, open(out, "w", encoding="utf-8"), indent=2, ensure_ascii=False)
         confirmed = sum(1 for c in merged if c.get("confirmed"))
         frozen = sum(len(c.get("baseline_exceptions", [])) for c in merged)

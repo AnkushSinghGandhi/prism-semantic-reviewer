@@ -146,7 +146,7 @@ def test_intent_contradiction_flows_into_review_and_sarif():
     review = build_review(changes, [], meta, changed={})
     assert review["contradictions"] == cons
     ids = {r["ruleId"] for r in build_sarif(review)["runs"][0]["results"]}
-    assert "prism/intent-contradiction" in ids
+    assert "pryti/intent-contradiction" in ids
 
 
 def test_mermaid_sequence_renders_changed_endpoints():
@@ -168,7 +168,7 @@ def test_mermaid_empty_when_no_changes():
 def test_sarif_is_valid_2_1_0_and_maps_severity():
     review = _blog_review()
     s = build_sarif(review)
-    assert s["version"] == "2.1.0" and s["runs"][0]["tool"]["driver"]["name"] == "Prism"
+    assert s["version"] == "2.1.0" and s["runs"][0]["tool"]["driver"]["name"] == "Pryti"
     results = s["runs"][0]["results"]
     assert results, "every semantic change should produce a SARIF result"
     # each result carries a valid code-scanning level and a location

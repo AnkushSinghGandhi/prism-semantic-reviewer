@@ -11,11 +11,11 @@ POST a new one — repeated pushes update in place instead of piling up.
 Inline (opt-in; needs --json + --inline): read the structured review and, for every finding whose
 location lands on a line this PR actually changed, post a review comment anchored there. A finding
 we can't anchor (its line isn't in the diff — GitHub would 422) is left to the sticky comment,
-which always carries the full review. Prior Prism inline comments (marker-tagged) are deleted
+which always carries the full review. Prior Pryti inline comments (marker-tagged) are deleted
 first so pushes don't stack duplicates. We only pin a comment where we can prove the line changed.
 
-Label (opt-in; needs --json + --label): apply one `prism:*` triage label for the PR's top
-severity so the queue is scannable at a glance; a prior Prism label is replaced, not stacked.
+Label (opt-in; needs --json + --label): apply one `pryti:*` triage label for the PR's top
+severity so the queue is scannable at a glance; a prior Pryti label is replaced, not stacked.
 
 Uses `gh api` (present on GitHub runners) with GITHUB_TOKEN.
 """
@@ -27,8 +27,8 @@ from urllib.parse import quote
 
 MARKER = "<!-- semantic-review -->"
 # One triage label per severity tier — the PR's worst signal picks exactly one.
-LABELS = {"🔴": "prism:🔴security", "🟠": "prism:🟠payment",
-          "🟡": "prism:🟡new-write", "🟢": "prism:🟢safe-refactor"}
+LABELS = {"🔴": "pryti:🔴security", "🟠": "pryti:🟠payment",
+          "🟡": "pryti:🟡new-write", "🟢": "pryti:🟢safe-refactor"}
 _SEV_ORDER = ["🔴", "🟠", "🟡", "🟢"]
 
 
@@ -107,7 +107,7 @@ def post_inline(repo, pr, review, dry):
         print(f"[inline] nothing anchorable — {unanchored} finding(s) left to the sticky comment")
         return
 
-    header = f"{MARKER}\n### ◭ Prism — {len(comments)} finding(s) pinned to changed lines"
+    header = f"{MARKER}\n### ✦ Pryti — {len(comments)} finding(s) pinned to changed lines"
     if unanchored:
         header += (f"\n\n{unanchored} more finding(s) touch code outside this diff — "
                    "see the summary comment for the full review.")
@@ -147,11 +147,11 @@ def pick_label(review):
 
 
 def post_label(repo, pr, review, dry):
-    """Apply one `prism:*` triage label (top severity), replacing any prior Prism label so pushes
+    """Apply one `pryti:*` triage label (top severity), replacing any prior Pryti label so pushes
     don't stack. Adding a label that doesn't exist yet creates it (GitHub default color)."""
     target = pick_label(review)
     if dry:
-        print(f"[dry-run] label PR #{pr} → {target} (drop any other prism:* label)")
+        print(f"[dry-run] label PR #{pr} → {target} (drop any other pryti:* label)")
         return
 
     r = gh_api(["-X", "POST", f"repos/{repo}/issues/{pr}/labels", "--input", "-"],
@@ -160,10 +160,10 @@ def post_label(repo, pr, review, dry):
         print(f"::warning::could not add label {target} "
               f"(needs 'permissions: issues: write'): {r.stderr.strip()}")
         return
-    # the POST returns the issue's full label set — drop any earlier prism:* label that isn't ours
+    # the POST returns the issue's full label set — drop any earlier pryti:* label that isn't ours
     for lbl in json.loads(r.stdout or "[]"):
         name = lbl.get("name", "") if isinstance(lbl, dict) else ""
-        if name.startswith("prism:") and name != target:
+        if name.startswith("pryti:") and name != target:
             gh_api(["-X", "DELETE", f"repos/{repo}/issues/{pr}/labels/{quote(name, safe='')}"])
     print(f"labeled PR #{pr}: {target}")
 

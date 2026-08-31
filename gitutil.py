@@ -4,8 +4,8 @@ import os
 import subprocess
 import tempfile
 
-CACHE_ROOT = os.environ.get("PRISM_CACHE", os.path.expanduser("~/.cache/prism/repos"))
-GIT_TIMEOUT = int(os.environ.get("PRISM_GIT_TIMEOUT", "180"))
+CACHE_ROOT = os.environ.get("PRYTI_CACHE", os.path.expanduser("~/.cache/pryti/repos"))
+GIT_TIMEOUT = int(os.environ.get("PRYTI_GIT_TIMEOUT", "180"))
 
 # Never let git block forever on a credential prompt (private repo w/o token) — fail fast.
 os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")
@@ -59,8 +59,8 @@ def ensure_local(repo, update=True):
         return repo
     key = hashlib.sha1(repo.encode()).hexdigest()[:16]
     roots = [CACHE_ROOT]
-    if "PRISM_CACHE" not in os.environ:
-        roots.append(os.path.join(tempfile.gettempdir(), "prism-cache", "repos"))
+    if "PRYTI_CACHE" not in os.environ:
+        roots.append(os.path.join(tempfile.gettempdir(), "pryti-cache", "repos"))
     last_err = None
     for root in roots:
         dest = os.path.join(root, key)

@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Prism CLI Entrypoint
+Pryti CLI Entrypoint
 """
 import sys
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        print("Prism Semantic Reviewer")
-        print("\nUsage: prism <command> [options]")
+        print("Pryti Semantic Reviewer")
+        print("\nUsage: pryti <command> [options]")
         print("\nCommands:")
         print("  review    Run a semantic review of a PR or commit range")
         print("  post      Post a review to a PR (sticky comment, inline comments, label)")
-        print("  serve     Start the Prism web UI")
+        print("  serve     Start the Pryti web UI")
         print("  invariants Discover baseline invariants from a repository's history")
-        print("  digest    Org-wide leadership roll-up from the labels Prism applies to PRs")
-        print("\nRun 'prism <command> --help' for more information on a command.")
+        print("  digest    Org-wide leadership roll-up from the labels Pryti applies to PRs")
+        print("\nRun 'pryti <command> --help' for more information on a command.")
         sys.exit(0)
 
     command = sys.argv[1]

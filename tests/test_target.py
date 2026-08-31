@@ -1,4 +1,4 @@
-"""Smart default target (#8): with no flags, `prism review` auto-detects current branch vs. the
+"""Smart default target (#8): with no flags, `pryti review` auto-detects current branch vs. the
 repo's default branch. Builds a throwaway git repo so the branch helpers exercise real git."""
 import os
 import subprocess

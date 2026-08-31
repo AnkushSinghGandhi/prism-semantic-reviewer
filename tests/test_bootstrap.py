@@ -1,4 +1,4 @@
-"""prism invariants --bootstrap — the pure corpus builder. No git, no IO."""
+"""pryti invariants --bootstrap — the pure corpus builder. No git, no IO."""
 import invariants
 
 

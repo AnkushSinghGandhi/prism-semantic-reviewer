@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prism — Semantic PR Review</title>
+<title>Pryti — Semantic PR Review</title>
 <style>
   :root{--bg:#0d1117;--panel:#161b22;--line:#30363d;--fg:#e6edf3;--mut:#8b949e;
     --crit:#f85149;--high:#db8f2b;--med:#d0b429;--low:#3fb950;--link:#58a6ff;--purple:#bc8cff;}
@@ -116,12 +116,12 @@
 <body>
 <header>
   <h1 style="display:flex;align-items:center;gap:10px">
-    <span class="logo">◭ <span class="g">Prism</span></span>
+    <span class="logo">✦ <span class="g">Pryti</span></span>
     <span style="color:var(--mut);font-weight:400;font-size:12.5px">semantic PR review</span>
     <div class="brand-corner">
       <span class="bwave">👋</span> by
       <a class="who" href="https://warriorwhocodes.com" target="_blank" rel="noopener">Ankush Singh Gandhi</a>
-      <a class="mini star" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer" target="_blank" rel="noopener">★ Star</a>
+      <a class="mini star" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer" target="_blank" rel="noopener">★ Star</a>
       <a class="mini sponsor" href="https://github.com/sponsors/AnkushSinghGandhi" target="_blank" rel="noopener">♥ Sponsor</a>
     </div>
   </h1>
@@ -160,9 +160,9 @@
 </header>
 <div id="welcome">
   <div class="hero">
-    <div class="mark">◭</div>
+    <div class="mark">✦</div>
     <h2>See what a PR <em>means</em>, not just what changed</h2>
-    <p>Point Prism at a <b>local repo</b>, then pick a merged PR — or compare two branches or two
+    <p>Point Pryti at a <b>local repo</b>, then pick a merged PR — or compare two branches or two
       commits. It turns a huge diff into the few changes that matter, with the exact lines to look at.</p>
     <div class="chips"><span>new endpoints</span><span>DB writes</span><span>external calls</span>
       <span>PII egress</span><span>auth changes</span></div>
@@ -170,7 +170,7 @@
       <span>🟡 new write / dependency</span><span>🟢 refactor</span></div>
     <div class="byline"><span class="wave">👋</span> by <a href="https://warriorwhocodes.com" target="_blank" rel="noopener">Ankush Singh Gandhi</a> · warriorwhocodes.com</div>
     <div class="links">
-      <a class="gh star" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer" target="_blank" rel="noopener">★ Star on GitHub</a>
+      <a class="gh star" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer" target="_blank" rel="noopener">★ Star on GitHub</a>
       <a class="gh sponsor" href="https://github.com/sponsors/AnkushSinghGandhi" target="_blank" rel="noopener">♥ Sponsor me</a>
     </div>
   </div>
@@ -187,14 +187,14 @@ const COL={crit:"var(--crit)",high:"var(--high)",med:"var(--med)",low:"var(--low
 const active=new Set(["🔴","🟠","🟡","🟢"]);
 let DATA=null, sel=null, tab="graph", graphZoom=1;
 
-// path-relative base so it works at "/" or under a sub-path like "/prism"; token from URL
+// path-relative base so it works at "/" or under a sub-path like "/pryti"; token from URL
 const BASE=location.pathname.endsWith("/")?location.pathname:location.pathname+"/";
 const TOKEN=new URLSearchParams(location.search).get("token")||"";
 function apiURL(p,params){params=Object.assign({},params||{});if(TOKEN)params.token=TOKEN;
   const q=qs(params);return BASE+p+(q?"?"+q:"");}
 
 // on load: prefill the (auto-detected) repo and, if the server was started with a target
-// (prism serve --pr / --commit / --base --head), open that review straight away.
+// (pryti serve --pr / --commit / --base --head), open that review straight away.
 fetch(apiURL("api/config")).then(r=>r.json()).then(c=>{
   if(c.repo) document.getElementById("repo").value=c.repo;
   const p=c.preload||{};
@@ -236,7 +236,7 @@ async function loadInvariants(){
     renderInvPanel(d);
     status(`${(d.candidates||[]).length} candidate invariant(s).`+
            (d.can_confirm?" Confirm the ones that are intentional.":
-            " (read-only — start `prism serve --invariants <path>` to confirm)"));
+            " (read-only — start `pryti serve --invariants <path>` to confirm)"));
     document.getElementById("invpanel").scrollIntoView({behavior:"smooth",block:"nearest"});
   }catch(e){status("Error: "+e);}
 }

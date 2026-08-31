@@ -1,1 +1,1 @@
-# Prism CI helpers (packaged so `prism post` can import post_review).
+# Pryti CI helpers (packaged so `pryti post` can import post_review).

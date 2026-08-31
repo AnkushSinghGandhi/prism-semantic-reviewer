@@ -1,4 +1,4 @@
-"""The CI label picker: one prism:* triage label per PR, chosen by the worst signal in the review
+"""The CI label picker: one pryti:* triage label per PR, chosen by the worst signal in the review
 (semantic changes, invariant alerts, or intent contradictions). Pure function — no network."""
 from ci.post_review import pick_label, LABELS
 

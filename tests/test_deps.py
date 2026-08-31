@@ -106,7 +106,7 @@ def test_pypi_provider_skips_non_pinned_versions_offline():
     assert pypi_source_provider("requests", "") is None
 
 
-# ---- integration through git (offline: PRISM_SCAN_DEPS=0 → ⚠ unresolved) ----
+# ---- integration through git (offline: PRYTI_SCAN_DEPS=0 → ⚠ unresolved) ----
 
 def test_dependency_findings_detects_a_bump(tmp_path, monkeypatch):
     import diff_pr
@@ -125,7 +125,7 @@ def test_dependency_findings_detects_a_bump(tmp_path, monkeypatch):
     (tmp_path / "r" / "requirements.txt").write_text("requests==2.31.0\n")
     git("commit", "-aqm", "bump")
 
-    monkeypatch.setenv("PRISM_SCAN_DEPS", "0")                # force offline → ⚠, no network
+    monkeypatch.setenv("PRYTI_SCAN_DEPS", "0")                # force offline → ⚠, no network
     out = diff_pr.dependency_findings(d, "HEAD~1", "HEAD")
     assert len(out) == 1 and out[0]["name"] == "requests"
     assert out[0]["old"] == "2.28.0" and out[0]["new"] == "2.31.0"

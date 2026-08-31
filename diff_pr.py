@@ -30,18 +30,18 @@ CRIT, HIGH, MED, LOW = "🔴", "🟠", "🟡", "🟢"
 EDGES = [("e3_db_tables", "db"), ("e4_external", "external"),
          ("e5_async", "async"), ("e6_pii", "pii")]
 
-INFO_URI = "https://github.com/AnkushSinghGandhi/prism"
-# GitHub code-scanning alert level per Prism severity tier.
+INFO_URI = "https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer"
+# GitHub code-scanning alert level per Pryti severity tier.
 SARIF_LEVEL = {CRIT: "error", HIGH: "error", MED: "warning", LOW: "note"}
 # Optional numeric on each result for the Security-tab Critical/High/Medium/Low sort.
 SARIF_SECURITY = {CRIT: "9.0", HIGH: "7.0", MED: "4.0", LOW: "2.0"}
 
 
-def _prism_version():
+def _pryti_version():
     try:
         from importlib.metadata import version, PackageNotFoundError
         try:
-            return version("prism-semantic-reviewer")
+            return version("pryti-semantic-reviewer")
         except PackageNotFoundError:
             pass
     except Exception:
@@ -146,13 +146,13 @@ def dependency_findings(repo, base, head):
     """Capability-delta findings for any dependency manifest changed in `base..head` (feature #5).
 
     Manifest bump detection is always on (cheap, offline); the capability scan fetches each version
-    from PyPI unless `PRISM_SCAN_DEPS=0`, degrading to ⚠ unresolved when offline — never assuming
+    from PyPI unless `PRYTI_SCAN_DEPS=0`, degrading to ⚠ unresolved when offline — never assuming
     safe. Returns [] when no manifest changed."""
     names = [p for p in sh("git", "-C", repo, "diff", "--name-only", base, head).splitlines()
              if deps_mod.is_manifest(p)]
     if not names:
         return []
-    provider = None if os.environ.get("PRISM_SCAN_DEPS") == "0" else deps_mod.pypi_source_provider
+    provider = None if os.environ.get("PRYTI_SCAN_DEPS") == "0" else deps_mod.pypi_source_provider
     findings = []
     for path in names:
         old_map = deps_mod.parse_manifest(path, sh("git", "-C", repo, "show", f"{base}:{path}"))
@@ -347,7 +347,7 @@ def intent_summary(changes, findings):
 
 
 # ---- Intent vs. behavior (feature #4) -------------------------------------------------------
-# The PR title/description is a *declared* intent — a contract the author wrote. Prism already
+# The PR title/description is a *declared* intent — a contract the author wrote. Pryti already
 # knows what the code does. Cross-check the two and flag disagreements. Competitors fake this by
 # asking an LLM to eyeball the diff; every contradiction below is derived from a verified fact
 # that traces to a `file:line`, so it can't be hallucinated. (#3 is the neutral summary; #4 is
@@ -408,7 +408,7 @@ def _where(route, loc):
 
 
 def intent_contradictions(title, changes, findings=None, body=""):
-    """Flag where the PR's declared intent (title/description) disagrees with Prism's own facts.
+    """Flag where the PR's declared intent (title/description) disagrees with Pryti's own facts.
     Returns finding dicts (`sev`/`claim`/`why`/`route`/`loc`) — a finding type competitors fake
     with an LLM, produced here from structured facts. Empty when no claim is declared, or the
     facts are consistent with it."""
@@ -447,7 +447,7 @@ def render_intent_section(contradictions):
          f"{_plural(len(contradictions), 'contradiction')}:\n"]
     for c in contradictions:
         L.append(f"- {c['sev']} {c['why']}")
-    L.append("\n_Declared intent = the PR title/description; each line is derived from Prism's own "
+    L.append("\n_Declared intent = the PR title/description; each line is derived from Pryti's own "
              "facts (traceable to `file:line`), not an LLM reading the diff._\n")
     return "\n".join(L)
 
@@ -677,7 +677,7 @@ def build_sarif(review):
             seen.add(rid)
             rules.append({"id": rid, "name": rid.split("/")[-1],
                           "shortDescription": {"text": desc},
-                          "properties": {"tags": ["prism"]}})
+                          "properties": {"tags": ["pryti"]}})
 
     def emit(rid, sev, text, path, line, in_diff, fp):
         loc = []
@@ -689,14 +689,14 @@ def build_sarif(review):
         results.append({
             "ruleId": rid, "level": SARIF_LEVEL.get(sev, "warning"),
             "message": {"text": text}, "locations": loc,
-            "partialFingerprints": {"prism/v1": fp},
-            "properties": {"prism-severity": sev, "in-diff": in_diff,
+            "partialFingerprints": {"pryti/v1": fp},
+            "properties": {"pryti-severity": sev, "in-diff": in_diff,
                            "security-severity": SARIF_SECURITY.get(sev, "4.0")},
         })
 
     for c in review.get("changes", []):
-        rid = "prism/" + c["kind"].lower().replace(" ", "-")
-        rule(rid, f"Prism semantic change: {c['kind']}")
+        rid = "pryti/" + c["kind"].lower().replace(" ", "-")
+        rule(rid, f"Pryti semantic change: {c['kind']}")
         path, line, in_diff = _best_location(c, changed)
         text = f"{c['kind']} {c['route']} — {c.get('why', '')}".strip()
         emit(rid, c.get("sev", MED), text, path, line, in_diff, f"{c['kind']}::{c['route']}")
@@ -704,8 +704,8 @@ def build_sarif(review):
     for f in review.get("invariants", []):
         if f["kind"] not in ("NEW VIOLATION", "WEAKENING", "STILL-VIOLATING", "STILL-OUT"):
             continue                            # only real alerts; HELD/RESOLVED aren't findings
-        rid = "prism/invariant/" + f["kind"].lower().replace(" ", "-")
-        rule(rid, f"Prism invariant alert: {f['kind']}")
+        rid = "pryti/invariant/" + f["kind"].lower().replace(" ", "-")
+        rule(rid, f"Pryti invariant alert: {f['kind']}")
         sev, stmt = f.get("sev", MED), f.get("stmt", "")
         located = []
         for loc in f.get("locs", []):
@@ -722,8 +722,8 @@ def build_sarif(review):
                  f"{f['kind']}::{stmt}")
 
     for c in review.get("contradictions", []):  # intent-vs-behavior (feature #4)
-        rid = "prism/intent-contradiction"
-        rule(rid, "Prism intent-vs-behavior contradiction")
+        rid = "pryti/intent-contradiction"
+        rule(rid, "Pryti intent-vs-behavior contradiction")
         p, ln = _split_where(c.get("loc", ""))
         in_diff = bool(p and ln is not None and ln in changed.get(p, ()))
         emit(rid, c.get("sev", HIGH), c.get("why", "intent contradiction"),
@@ -732,8 +732,8 @@ def build_sarif(review):
     for d in review.get("dependencies", []):    # dependency capability-delta (feature #5)
         if not (d.get("gained") or d.get("unresolved")):
             continue                            # a bump with no new capabilities isn't an alert
-        rid = "prism/dependency-capability"
-        rule(rid, "Prism dependency capability change")
+        rid = "pryti/dependency-capability"
+        rule(rid, "Pryti dependency capability change")
         path = d.get("manifest")
         text = f"{d['name']} {d.get('old') or '(new)'}→{d['new']} — {d.get('why', '')}"
         emit(rid, d.get("sev", MED), text, path, None, False,
@@ -743,8 +743,8 @@ def build_sarif(review):
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
-            "tool": {"driver": {"name": "Prism", "informationUri": INFO_URI,
-                                "version": _prism_version(), "rules": rules}},
+            "tool": {"driver": {"name": "Pryti", "informationUri": INFO_URI,
+                                "version": _pryti_version(), "rules": rules}},
             "results": results,
         }],
     }
@@ -765,7 +765,7 @@ def _gh_owner_repo(url):
 
 def _github_json(api):
     req = urllib.request.Request(api, headers={"Accept": "application/vnd.github+json",
-                                               "User-Agent": "prism"})
+                                               "User-Agent": "pryti"})
     tok = os.environ.get("GITHUB_TOKEN")
     if tok:
         req.add_header("Authorization", f"Bearer {tok}")
@@ -779,7 +779,7 @@ def _is_github_url(repo):
 def resolve_github_pr(url, local, n):
     """Look up a real GitHub PR: return (base_sha, head_sha, title). Fetches the PR head ref."""
     if not _is_github_url(url):
-        raise RuntimeError("--pr requires a GitHub repo URL so Prism can look up the PR metadata")
+        raise RuntimeError("--pr requires a GitHub repo URL so Pryti can look up the PR metadata")
     owner, repo = _gh_owner_repo(url)
     api = f"https://api.github.com/repos/{owner}/{repo}/pulls/{n}"
     data = _github_json(api)
@@ -797,8 +797,8 @@ def resolve_github_pr(url, local, n):
         raise RuntimeError(f"could not fetch GitHub PR {n} {label}: {last}")
 
     # Fetch only the commits needed for this PR into local refs so git archive can find them.
-    fetch_ref("base", "refs/prism/base", base_sha, data["base"]["ref"])
-    fetch_ref("head", "refs/prism/head", f"pull/{n}/head", head_sha)
+    fetch_ref("base", "refs/pryti/base", base_sha, data["base"]["ref"])
+    fetch_ref("head", "refs/pryti/head", f"pull/{n}/head", head_sha)
     return base_sha, head_sha, f"PR #{n}: {data.get('title', '')}", data.get("body") or ""
 
 
@@ -967,7 +967,7 @@ def main():
         res = run_review(repo, base=args.base, head=args.head, merge=args.merge,
                          pr=args.pr, commit=args.commit, invariants_path=args.invariants)
     except RuntimeError as e:
-        sys.exit(f"prism: {e}")
+        sys.exit(f"pryti: {e}")
     review, report, findings, changes = res["review"], res["report"], res["findings"], res["changes"]
     if res.get("auto_target"):
         b, h = res["auto_target"]
