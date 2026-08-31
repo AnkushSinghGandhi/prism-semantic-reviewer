@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Prism — see what a pull request actually changes</title>
-<meta name="description" content="Git tells you what lines changed. Prism tells you what they mean — and where to look. A semantic PR reviewer for Python web apps.">
+<title>Prism — deterministic semantic PR reviewer (no LLM, no API key)</title>
+<meta name="description" content="A deterministic semantic PR reviewer for Python web apps. No LLM, no API key, no per-PR token bill — same PR in, same review out. Git tells you what lines changed; Prism tells you what they mean and where to look.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◭</text></svg>">
 <style>
   :root{
@@ -139,9 +139,16 @@
 
 <header class="hero"><div class="wrap">
   <div class="mark">◭</div>
-  <h1>See what a pull request <em>actually</em> changes</h1>
+  <h1>See what a pull request <em>actually</em> changes — <em>no LLM required</em></h1>
   <p class="sub">Git tells you what <b>lines</b> changed. Prism tells you what they <b>mean</b> — and points you at the exact line to read.</p>
-  <p class="one">A semantic PR reviewer for Python web apps. It makes it impossible for an important change to hide inside a huge, AI-generated diff.</p>
+  <p class="one">A <b>deterministic</b> semantic PR reviewer for Python web apps. No AI black box, no API key, no per-PR token bill — same PR in, same review out, every time.</p>
+  <div class="pills" style="justify-content:center">
+    <span class="pill"><b>No LLM</b></span>
+    <span class="pill"><b>No API key</b></span>
+    <span class="pill"><b>$0 per PR</b></span>
+    <span class="pill"><b>Deterministic</b></span>
+    <span class="pill"><b>Runs offline</b></span>
+  </div>
   <div class="cta">
     <a class="btn primary" href="https://github.com/AnkushSinghGandhi/prism-semantic-reviewer">Get started on GitHub</a>
     <a class="btn ghost" href="https://pypi.org/project/prism-semantic-reviewer/">View on PyPI</a>
@@ -285,7 +292,7 @@
   <div class="faq">
     <details><summary>Won't it be noisy?</summary><p>No — it's a <b>diff</b>. It only speaks up about what a PR actually changed, and it labels anything uncertain "look here," never "safe." Roll it out in observe mode and you'll see the signal before it can ever block a merge.</p></details>
     <details><summary>Does it need setup or config?</summary><p>Nothing. It's a pure-Python-standard-library package with <b>zero third-party dependencies</b>. Point it at a repo (local path or GitHub URL) and go — no config file, no server, no account.</p></details>
-    <details><summary>Will it hallucinate like an AI reviewer?</summary><p>No. There's no LLM in the analysis. It reads your code with Python's parser and reports <b>facts</b>; every finding traces to an exact <code>file:line</code>, so there's nothing to double-check.</p></details>
+    <details><summary>Will it hallucinate like an AI reviewer?</summary><p>No. There's no LLM in the analysis — so there's nothing to hallucinate, no API key to wire up, and no per-PR token bill. It reads your code with Python's parser and reports <b>facts</b>; every finding traces to an exact <code>file:line</code>, and the same PR always produces the same review. That's the whole point: LLM reviewers are smart but drift and cost tokens; Prism is deterministic and free.</p></details>
     <details><summary>Does it run my code?</summary><p>Never. It reads code statically and analyzes clean git snapshots (via <code>git archive</code>) in a temp folder — it doesn't execute anything or touch your working tree. Safe to point at any repo.</p></details>
     <details><summary>What about repos that aren't Django / DRF?</summary><p>Its lens is endpoint-centric (Django &amp; Django REST Framework today). On a repo it can't read, it simply finds nothing to report — it won't invent false alarms. More frameworks (FastAPI, …) are on the roadmap.</p></details>
     <details><summary>Do I need GitHub Advanced Security?</summary><p>No. The review, PR comments, labels, gating, and the org roll-up all work without it. GHAS only powers the optional SARIF Security-tab dashboard.</p></details>
