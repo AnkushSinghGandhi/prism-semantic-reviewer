@@ -38,6 +38,10 @@ ORM_WRITE = {"create", "update", "save", "delete", "bulk_create", "bulk_update",
 # Excluding these stops `cache.delete(key)` etc. from being mislabeled a table write (`<instance>`).
 NON_ORM_RECEIVERS = {"cache", "caches", "session", "storage", "default_storage", "fs"}
 
+# class-name suffixes that are NOT ORM tables (a `serializer.save()` writes to its Meta.model, not a
+# table named "FooSerializer"). We resolve these to Meta.model when known, else fall back to unknown.
+NON_MODEL_SUFFIXES = ("Serializer", "Form")
+
 # sensitive attribute names for the PII edge
 SENSITIVE = {"email", "phone", "mobile", "password", "ssn", "aadhaar", "aadhar",
              "pan", "card", "card_number", "address", "dob", "date_of_birth",
@@ -91,6 +95,7 @@ class RepoIndex:
         self.default_permissions = None        # DEFAULT_PERMISSION_CLASSES (list) or None
         self.module_consts: dict[str, dict] = {}   # file -> {NAME: folded string}
         self.global_consts: dict[str, str] = {}    # repo-wide URL constants (unambiguous only)
+        self.class_models: dict[str, str] = {}     # Serializer/Form/etc. name -> its Meta.model table
         self._build()
 
     def _iter_py(self):
@@ -121,6 +126,9 @@ class RepoIndex:
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     self.classes.setdefault(node.name, []).append((node, path))
+                    m = _class_meta_model(node)               # DRF/Django `class Meta: model = X`
+                    if m:
+                        self.class_models[node.name] = m
                 elif isinstance(node, ast.FunctionDef):
                     self.funcs.setdefault(node.name, []).append((node, path))
         self.global_consts = {n: v for n, v in seen.items() if n not in ambiguous}
@@ -246,8 +254,9 @@ def parse_endpoints(index: RepoIndex) -> list:
 class FactCollector(ast.NodeVisitor):
     """Walk a function body; collect lens facts. Records callees for 1-level follow."""
 
-    def __init__(self, file: str = "", consts=None):
+    def __init__(self, file: str = "", consts=None, class_models=None):
         self.file = file
+        self.class_models = class_models or {}   # Serializer/Form name -> its Meta.model table
         self.db = []           # (model, kind, file, line)
         self.external = []     # (root, dest, file, line)
         self.async_ = []       # (mechanism, target, file, line)
@@ -278,6 +287,9 @@ class FactCollector(ast.NodeVisitor):
         if isinstance(f, ast.Attribute) and f.attr in {"save", "delete"} and not model \
                 and not _is_non_orm_receiver(f.value):
             who = self.var_types.get(_receiver_key(f.value))
+            who = self.class_models.get(who, who)            # FooSerializer.save() → its Meta.model
+            if who and who.endswith(NON_MODEL_SUFFIXES):     # a serializer/form we couldn't map → unknown
+                who = None
             self.db.append((who or "<instance>", "write", fl, ln))
         # external calls
         if isinstance(f, ast.Attribute):
@@ -566,6 +578,21 @@ def _fold_str(node, str_vars: dict) -> Optional[str]:
     return None
 
 
+def _class_meta_model(classdef):
+    """The `model = X` inside a class's inner `class Meta:` — the table a ModelSerializer/ModelForm
+    actually writes to. Returns the model name or None."""
+    for n in classdef.body:
+        if isinstance(n, ast.ClassDef) and n.name == "Meta":
+            for s in n.body:
+                if isinstance(s, ast.Assign) and any(
+                        isinstance(t, ast.Name) and t.id == "model" for t in s.targets):
+                    if isinstance(s.value, ast.Name):
+                        return s.value.id
+                    if isinstance(s.value, ast.Attribute):
+                        return s.value.attr
+    return None
+
+
 def _module_str_consts(tree, base=None):
     """Top-level `NAME = <string>` constants in a module, folded to their static value (with
     {placeholder} for parts like settings.X). Accumulates so `B = A + '/x'` resolves via `A`, and
@@ -728,7 +755,8 @@ def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth):
     is tagged "(via call)" so the report stays honest about indirection.
     """
     owner_rel = _rel(index, owner_file)
-    local = FactCollector(owner_rel, consts=index.consts_for(owner_file))
+    local = FactCollector(owner_rel, consts=index.consts_for(owner_file),
+                          class_models=index.class_models)
     local.visit(fn)
     if depth == 0:
         agg.db += local.db

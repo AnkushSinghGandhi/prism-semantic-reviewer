@@ -106,6 +106,27 @@ def test_instance_write_resolves_via_self_attr_and_tuple():
     assert _db_models(src) == {"Widget", "Gadget"}
 
 
+def test_serializer_save_resolves_to_meta_model_not_class():
+    # `s = WebinarSerializer(...); s.save()` writes to the serializer's Meta.model, not a
+    # table named "WebinarSerializer"
+    fc = FactCollector("m.py", class_models={"WebinarSerializer": "Webinar"})
+    fc.visit(ast.parse("class H:\n"
+                       "    def f(self):\n"
+                       "        s = WebinarSerializer(data=1)\n"
+                       "        s.save()\n"))
+    assert {m for m, _k, _f, _l in fc.db} == {"Webinar"}
+
+
+def test_unmapped_serializer_is_unknown_not_a_fake_table():
+    # a *Serializer we can't map to a model must not appear as a table named "...Serializer"
+    fc = FactCollector("m.py", class_models={})
+    fc.visit(ast.parse("class H:\n"
+                       "    def f(self):\n"
+                       "        s = MysterySerializer(data=1)\n"
+                       "        s.save()\n"))
+    assert {m for m, _k, _f, _l in fc.db} == {"<instance>"}
+
+
 def test_unresolved_instance_write_stays_honest():
     # a receiver we genuinely can't type is still surfaced as <instance>:write, never dropped
     src = ("class H:\n"
