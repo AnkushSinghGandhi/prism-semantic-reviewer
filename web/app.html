@@ -25,7 +25,12 @@
   .inv{margin:12px 18px 0;border:1px solid var(--crit);border-radius:8px;background:rgba(248,81,73,.08)}
   .inv.info{border-color:var(--line);background:rgba(88,166,255,.06)}
   .inv .det a{color:var(--link);text-decoration:none}.inv .det a:hover{text-decoration:underline}
-  .inv h2{margin:0;padding:9px 13px;font-size:13px;border-bottom:1px solid var(--line)}
+  .inv summary{margin:0;padding:9px 13px;font-size:13px;font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:7px}
+  .inv summary::-webkit-details-marker{display:none}
+  .inv summary::before{content:"▸";color:var(--mut);font-size:9px;flex:none}
+  .inv[open] summary::before{content:"▾"}
+  .inv[open] summary{border-bottom:1px solid var(--line)}
+  .inv summary:hover{background:rgba(255,255,255,.03)}
   .inv .row{padding:8px 13px;border-bottom:1px solid var(--line)}.inv .row:last-child{border-bottom:0}
   .inv .det{color:var(--mut);font-size:12px;margin-top:2px}
   main{display:grid;grid-template-columns:minmax(320px,400px) 1fr;height:calc(100vh - 132px)}
@@ -270,8 +275,8 @@ function renderInvPanel(d){
       `<div style="margin-top:6px">${act}${blame}</div><div class="det mono" id="blame-${esc(c.id).replace(/[^a-z-]/gi,'_')}"></div></div>`;
   }).join("");
   document.getElementById("invpanel").innerHTML=
-    `<div class="inv"><h2>⚖ Invariants — confirm the rules this codebase already follows</h2>`+
-    (rows||`<div class="det">no candidate invariants discovered</div>`)+`</div>`;
+    panel("", true, "⚖ Invariants — confirm the rules this codebase already follows",
+      rows||`<div class="det">no candidate invariants discovered</div>`);
 }
 async function confirmInv(id){
   const repo=val("repo").trim();
@@ -392,6 +397,11 @@ async function review(){
   }catch(e){status("Error: "+e);}
 }
 
+// a collapsible summary panel (native <details>); `open` sets the default state
+function panel(cls, open, title, body){
+  return `<details class="inv${cls?" "+cls:""}"${open?" open":""}><summary>${title}</summary>${body}</details>`;
+}
+
 function render(){
   document.body.classList.add("loaded");   // swap the welcome screen for the results layout
   document.getElementById("summary").textContent = DATA.summary || "";
@@ -401,18 +411,18 @@ function render(){
     +`<span style="color:var(--mut)">${DATA.changes.length} semantic changes</span>`;
   const contra=DATA.contradictions||[];         // intent-vs-behavior (feature #4)
   const contraHtml = contra.length ?
-    `<div class="inv"><h2>🎭 Intent vs. behavior — PR describes itself as “${esc(contra[0].claim)}”, but the facts disagree</h2>`+
-    contra.map(c=>`<div class="row"><div>${c.sev} ${esc(c.why).replace(/\x60/g,"")}</div></div>`).join("")+`</div>` : "";
+    panel("", true, `🎭 Intent vs. behavior — PR describes itself as “${esc(contra[0].claim)}”, but the facts disagree`,
+      contra.map(c=>`<div class="row"><div>${c.sev} ${esc(c.why).replace(/\x60/g,"")}</div></div>`).join("")) : "";
   const deps=(DATA.dependencies||[]).filter(d=>(d.gained&&d.gained.length)||d.unresolved);   // feature #5
   const depsHtml = deps.length ?
-    `<div class="inv"><h2>📦 Dependency capability changes</h2>`+
-    deps.map(d=>`<div class="row"><div>${d.unresolved?"⚠":d.sev} <b>${esc(d.name)} ${esc(d.old||"(new)")}→${esc(d.new)}</b> — ${esc(d.why)}</div></div>`).join("")+`</div>` : "";
+    panel("", false, `📦 Dependency capability changes (${deps.length})`,
+      deps.map(d=>`<div class="row"><div>${d.unresolved?"⚠":d.sev} <b>${esc(d.name)} ${esc(d.old||"(new)")}→${esc(d.new)}</b> — ${esc(d.why)}</div></div>`).join("")) : "";
   const alerts=(DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
   const invHtml = alerts.length ?
-    `<div class="inv"><h2>🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR</h2>`+
-    alerts.map(f=>`<div class="row"><div><b>${f.sev} ${f.kind}</b> — ${esc(f.stmt)}</div>`+
+    panel("", true, `🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR`,
+      alerts.map(f=>`<div class="row"><div><b>${f.sev} ${f.kind}</b> — ${esc(f.stmt)}</div>`+
       (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
-      (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")+`</div>` : "";
+      (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")) : "";
   const egress=(DATA.egress||[]);              // #4 — endpoints funnelling through one destination
   const routeIdx={}; DATA.changes.forEach((c,i)=>{routeIdx[c.route]=i;});
   const eflag={partial:" · ⚠ partial (host has a runtime placeholder)",
@@ -421,10 +431,10 @@ function render(){
     ? `<a href="#" onclick="selectChange(${routeIdx[r]});return false">${esc(r)}</a>`
     : `<span class="mono" style="color:var(--mut)">${esc(r)}</span>`;
   const egressHtml = egress.length ?
-    `<div class="inv info"><h2>🌐 Shared egress — ${egress.length} destination(s) reached by multiple endpoints (verify once, not per route)</h2>`+
-    egress.map(g=>`<div class="row"><div><b>${g.count} endpoints → <span class="mono">${esc(g.dest)}</span></b>`+
+    panel("info", false, `🌐 Shared egress — ${egress.length} destination(s) reached by multiple endpoints (verify once, not per route)`,
+      egress.map(g=>`<div class="row"><div><b>${g.count} endpoints → <span class="mono">${esc(g.dest)}</span></b>`+
       `<span style="color:var(--mut)">${eflag[g.status]||""}</span></div>`+
-      `<div class="det">`+g.routes.map(chip).join(", ")+`</div></div>`).join("")+`</div>` : "";
+      `<div class="det">`+g.routes.map(chip).join(", ")+`</div></div>`).join("")) : "";
   document.getElementById("invwrap").innerHTML = contraHtml + depsHtml + invHtml + egressHtml;
   renderFilters();
   document.getElementById("detail").innerHTML='<div class="empty">Select a change.</div>';
