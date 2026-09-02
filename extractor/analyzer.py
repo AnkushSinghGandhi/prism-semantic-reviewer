@@ -135,16 +135,27 @@ class RepoIndex:
                 if name in pseen and pseen[name] != lst:
                     pamb.add(name)
                 pseen[name] = lst
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ClassDef):
-                    self.classes.setdefault(node.name, []).append((node, path))
-                    m = _class_meta_model(node)               # DRF/Django `class Meta: model = X`
-                    if m:
-                        self.class_models[node.name] = m
-                elif isinstance(node, ast.FunctionDef):
-                    self.funcs.setdefault(node.name, []).append((node, path))
+            self._index_defs(tree, path)
         self.global_consts = {n: v for n, v in seen.items() if n not in ambiguous}
         self.perm_consts = {n: v for n, v in pseen.items() if n not in pamb}
+
+    def _index_defs(self, node, path):
+        """Index ClassDefs and FunctionDefs, recursing through the module, class bodies, and
+        control-flow (if/try/with) — but NOT into function bodies. Handlers and the helpers we
+        follow are module-level or class methods, never nested inside a function, so pruning
+        function bodies (the bulk of the AST) skips ~all the cost with no loss."""
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                self.classes.setdefault(child.name, []).append((child, path))
+                m = _class_meta_model(child)                  # DRF/Django `class Meta: model = X`
+                if m:
+                    self.class_models[child.name] = m
+                self._index_defs(child, path)                 # into class body (methods, Meta)
+            elif isinstance(child, ast.FunctionDef):
+                self.funcs.setdefault(child.name, []).append((child, path))
+                # prune: a function body holds no module-level handlers/helpers to index
+            else:
+                self._index_defs(child, path)                 # if/try/with/… may wrap defs
 
     def consts_for(self, file: str) -> dict:
         """String constants visible in `file`: the repo-wide table, with this module's own on top."""
