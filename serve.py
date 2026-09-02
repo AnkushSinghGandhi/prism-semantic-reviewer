@@ -26,7 +26,7 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import diff_pr           # noqa: E402
 import invariants as inv_mod                          # noqa: E402
-from gitutil import (is_url, git_toplevel, ensure_local,   # noqa: E402
+from gitutil import (is_url, git_toplevel, ensure_local, sh,   # noqa: E402
                      current_branch, default_branch)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,6 +41,20 @@ def _discovered(repo, n):
         _, cands = inv_mod.discover(ensure_local(repo), n)
         INV_CACHE[key] = inv_mod.corpus(cands)
     return INV_CACHE[key]
+
+
+def source_snippet(repo, ref, rel, line, ctx=6):
+    """A few source lines around `line` of `rel` at git `ref` (read-only via `git show`, so it works
+    for the exact reviewed snapshot even after temp checkouts are gone). `{found: False}` if missing."""
+    for r in ([ref, "HEAD"] if ref and ref != "HEAD" else ["HEAD"]):     # fall back to HEAD
+        text = sh("git", "-C", repo, "show", f"{r}:{rel}")
+        if text:
+            lines = text.splitlines()
+            start = max(1, line - ctx)
+            end = min(len(lines), line + ctx)
+            return {"found": True, "path": rel, "line": line, "start": start,
+                    "lines": lines[start - 1:end]}
+    return {"found": False, "path": rel, "line": line}
 
 
 def _read_corpus(path):
@@ -133,6 +147,18 @@ def make_handler(cfg):
                                                  invariants_path=inv)
                         CACHE[key] = res["review"]
                     return self._json(200, CACHE[key])
+                if path == "/api/source":
+                    # source snippet for a flow-graph node: git show <ref>:<path> around a line
+                    repo = g("repo") or cfg["repo"]
+                    if not repo:
+                        return self._json(400, {"error": "no repo given"})
+                    if not self._repo_ok(repo):
+                        return self._json(403, {"error": "repo not in allowlist"})
+                    rel, line = g("path"), int(g("line", "1"))
+                    if not rel:
+                        return self._json(400, {"error": "no path given"})
+                    return self._json(200, source_snippet(ensure_local(repo), g("ref") or "HEAD",
+                                                          rel, line, int(g("ctx", "6"))))
                 if path == "/api/invariants":
                     repo = g("repo") or cfg["repo"]
                     if not repo:

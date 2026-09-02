@@ -63,6 +63,14 @@
   .lg-handler::before{background:var(--link)}.lg-read::before{background:#6e7681}.lg-write::before{background:var(--high)}
   .lg-ext::before{background:var(--crit)}.lg-async::before{background:var(--purple)}
   .lg-cache::before{background:#39c5cf}.lg-dbtable::before{background:#57ab5a}
+  .snippet{margin-top:12px}
+  .snippet .snhead{font-size:11.5px;color:var(--mut);padding:5px 2px}
+  .snippet .mut{color:var(--mut)}
+  .sncode{border:1px solid var(--line);border-radius:6px;overflow:auto;background:var(--panel)}
+  .snline{display:flex;font-size:12px;line-height:1.5}
+  .snline.hl{background:rgba(210,180,41,.16)}
+  .snn{color:var(--mut);text-align:right;width:42px;padding:0 8px;flex:none;user-select:none;border-right:1px solid var(--line)}
+  .snc{padding:0 10px;white-space:pre;overflow-x:auto}
   svg text{fill:var(--fg);font:12px ui-monospace,Menlo,monospace}
   svg .elabel{fill:#adbac7;font-size:10.5px}
   .gtools{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-4px 0 8px;flex-wrap:wrap}
@@ -573,8 +581,24 @@ function renderTab(c){
       `<span class="zoom"><button onclick="zoomGraph(1/1.2)" title="Zoom out">−</button>`+
       `<span class="zpct">${Math.round(graphZoom*100)}%</span>`+
       `<button onclick="zoomGraph(1.2)" title="Zoom in">+</button></span></div>`+
-      drawGraph(c.graph);
+      drawGraph(c.graph)+
+      `<div id="snippet" class="snippet"><div class="snhead">↑ click any block to see its source</div></div>`;
   }
+}
+
+// fetch and show the source lines behind a clicked flow-graph block (reveals real cache keys, etc.)
+async function showSource(loc){
+  const i=loc.lastIndexOf(":"), path=i>0?loc.slice(0,i):loc, line=i>0?(+loc.slice(i+1)||1):1;
+  const box=document.getElementById("snippet"); if(!box) return;
+  const repo=val("repo").trim(), ref=(DATA&&DATA.head)||"";
+  box.innerHTML=`<div class="snhead mono">${esc(path)}:${line} <span class="mut">loading…</span></div>`;
+  try{
+    const d=await getJSON(apiURL("api/source",{repo,ref,path,line}));
+    if(!d.found){ box.innerHTML=`<div class="snhead mono">${esc(path)}:${line} — source not available at ${esc(ref||"HEAD")}</div>`; return; }
+    const rows=d.lines.map((ln,k)=>{ const n=d.start+k;
+      return `<div class="snline${n===d.line?' hl':''}"><span class="snn">${n}</span><span class="snc">${esc(ln)||" "}</span></div>`;}).join("");
+    box.innerHTML=`<div class="snhead mono">${esc(path)}:${line}</div><div class="sncode mono">${rows}</div>`;
+  }catch(e){ box.innerHTML=`<div class="snhead mono">${esc(path)}:${line} — ${esc(String(e))}</div>`; }
 }
 
 // ---- SVG node-link graph (layered: route → handler → leaves) ----
@@ -619,8 +643,9 @@ function drawGraph(g){
     const mark=st==="added"?`<text x="${x-11}" y="${y+4}" fill="var(--low)" font-weight="700">+</text>`
              :st==="removed"?`<text x="${x-11}" y="${y+4}" fill="var(--crit)" font-weight="700">−</text>`:"";
     const pii=n.pii?`<circle cx="${x+ww-8}" cy="${y-boxH/2+2}" r="5" fill="var(--crit)"><title>PII source</title></circle>`:"";
-    const tip=[n.label, n.type==="handler"&&n.auth?n.auth:"", n.loc||""].filter(Boolean).join("  ·  ");
-    return `<g opacity="${op}"><title>${esc(tip)}</title>${mark}<rect x="${x}" y="${y-boxH/2}" width="${ww}" height="${boxH}" rx="6" `+
+    const tip=[n.label, n.type==="handler"&&n.auth?n.auth:"", n.loc||"", n.loc?"(click for code)":""].filter(Boolean).join("  ·  ");
+    const click=n.loc?`onclick="showSource('${esc(n.loc).replace(/'/g,'')}')" style="cursor:pointer"`:"";
+    return `<g opacity="${op}" ${click}><title>${esc(tip)}</title>${mark}<rect x="${x}" y="${y-boxH/2}" width="${ww}" height="${boxH}" rx="6" `+
       `fill="var(--panel)" stroke="${stroke}" stroke-width="${sw}" ${dash}/>`+
       `<text x="${x+9}" y="${y+4}">${esc(clip(n.label,34))}</text>${pii}</g>`;
   }

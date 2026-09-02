@@ -96,3 +96,14 @@ def test_confirm_requires_configured_corpus(repo):
         assert status == 400 and "corpus" in d["error"]
     finally:
         httpd.shutdown()
+
+
+def test_source_snippet_reads_committed_file(repo):
+    # a flow-graph node's source: git show HEAD:views.py around a line, target line centered
+    snip = serve.source_snippet(repo, "HEAD", "views.py", 3, ctx=2)
+    assert snip["found"] and snip["line"] == 3 and snip["start"] >= 1
+    assert 1 <= len(snip["lines"]) <= 5
+
+
+def test_source_snippet_missing_path_is_not_found(repo):
+    assert serve.source_snippet(repo, "HEAD", "does_not_exist.py", 1)["found"] is False
