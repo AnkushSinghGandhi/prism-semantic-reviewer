@@ -73,6 +73,48 @@ def _external_dests(src):
     return [dest for _root, dest, _f, _l in fc.external]
 
 
+def _db_models(src):
+    fc = FactCollector("m.py")
+    fc.visit(ast.parse(src))
+    return {model for model, _kind, _f, _l in fc.db}
+
+
+def test_cache_and_session_ops_are_not_db_writes():
+    # `cache.delete(k)` / `request.session.save()` are not ORM writes → no <instance> table
+    src = ("from django.core.cache import cache\n"
+           "class H:\n"
+           "    def f(self, request):\n"
+           "        cache.delete('k')\n"
+           "        request.session.save()\n")
+    assert _db_models(src) == set()
+
+
+def test_instance_write_resolves_via_param_annotation():
+    src = ("class H:\n"
+           "    def f(self, obj: EntityLock):\n"
+           "        obj.save()\n")
+    assert _db_models(src) == {"EntityLock"}
+
+
+def test_instance_write_resolves_via_self_attr_and_tuple():
+    src = ("class H:\n"
+           "    def f(self):\n"
+           "        self.row = Widget()\n"
+           "        self.row.save()\n"
+           "        obj, created = Gadget.objects.get_or_create(id=1)\n"
+           "        obj.save()\n")
+    assert _db_models(src) == {"Widget", "Gadget"}
+
+
+def test_unresolved_instance_write_stays_honest():
+    # a receiver we genuinely can't type is still surfaced as <instance>:write, never dropped
+    src = ("class H:\n"
+           "    def f(self):\n"
+           "        obj = build_thing()\n"
+           "        obj.save()\n")
+    assert "<instance>" in _db_models(src)
+
+
 def test_external_dest_folds_var_and_concat():
     # `requests.post(url)` where url = 'lit' + settings.X + 'lit' → resolved, not a bare "?"
     src = ("import requests\n"

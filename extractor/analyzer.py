@@ -34,6 +34,10 @@ ORM_READ = {"get", "filter", "all", "values", "values_list", "count", "exists",
 ORM_WRITE = {"create", "update", "save", "delete", "bulk_create", "bulk_update",
              "get_or_create", "update_or_create", "insert", "add", "set", "remove"}
 
+# receivers where a bare .save()/.delete() is NOT a DB write — cache, session, file/blob storage.
+# Excluding these stops `cache.delete(key)` etc. from being mislabeled a table write (`<instance>`).
+NON_ORM_RECEIVERS = {"cache", "caches", "session", "storage", "default_storage", "fs"}
+
 # sensitive attribute names for the PII edge
 SENSITIVE = {"email", "phone", "mobile", "password", "ssn", "aadhaar", "aadhar",
              "pan", "card", "card_number", "address", "dob", "date_of_birth",
@@ -253,9 +257,11 @@ class FactCollector(ast.NodeVisitor):
         if model and method:
             kind = "write" if method in ORM_WRITE else ("read" if method in ORM_READ else "read")
             self.db.append((model, kind, fl, ln))
-        # instance .save()/.delete() — resolve `var.save()` to its model when we know the type
-        if isinstance(f, ast.Attribute) and f.attr in {"save", "delete"} and not model:
-            who = self.var_types.get(f.value.id) if isinstance(f.value, ast.Name) else None
+        # instance .save()/.delete() — resolve `var.save()` to its model when we know the type,
+        # but skip non-ORM receivers (cache/session/storage) so they aren't mislabeled DB writes.
+        if isinstance(f, ast.Attribute) and f.attr in {"save", "delete"} and not model \
+                and not _is_non_orm_receiver(f.value):
+            who = self.var_types.get(_receiver_key(f.value))
             self.db.append((who or "<instance>", "write", fl, ln))
         # external calls
         if isinstance(f, ast.Attribute):
@@ -302,17 +308,33 @@ class FactCollector(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign):
         # remember `x = <something that reveals a Model>` so a later `x.save()` names the table
+        model = self._model_of(node.value)
+        for tgt in node.targets:
+            if isinstance(tgt, (ast.Name, ast.Attribute)) and model:   # x = … / self.x = Model(…)
+                self.var_types[_receiver_key(tgt)] = model
+            elif isinstance(tgt, (ast.Tuple, ast.List)) and tgt.elts \
+                    and isinstance(tgt.elts[0], ast.Name) and isinstance(node.value, ast.Call):
+                m, meth = _orm_model_method(node.value.func)           # obj, created = M.objects.get_or_create()
+                if m and meth in {"get_or_create", "update_or_create"}:
+                    self.var_types[tgt.elts[0].id] = m
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-            model = self._model_of(node.value)
-            if model:
-                self.var_types[node.targets[0].id] = model
+            name = node.targets[0].id
             val = _fold_str(node.value, self.str_vars)       # `url = 'x' + settings.Y` → resolve dest later
             if val is not None:
-                self.str_vars[node.targets[0].id] = val
+                self.str_vars[name] = val
             labels = self._taint_labels(node.value)          # `email = user.email` → var is tainted
             if labels:
-                self.tainted[node.targets[0].id] = set(labels)
+                self.tainted[name] = set(labels)
         self.generic_visit(node)
+
+    def visit_FunctionDef(self, node):
+        # a parameter annotated with a model type resolves `param.save()` inside the body
+        for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+            m = _anno_model(a.annotation)
+            if m:
+                self.var_types[a.arg] = m
+        self.generic_visit(node)
+    visit_AsyncFunctionDef = visit_FunctionDef
 
     def visit_For(self, node: ast.For):
         # `for order in Order.objects.filter(...)` → loop var is an Order (resolves `order.save()`)
@@ -409,6 +431,39 @@ def _orm_model_method(f):
     if isinstance(cur, ast.Attribute) and cur.attr == "objects" and isinstance(cur.value, ast.Name):
         return cur.value.id, method
     return None, None
+
+
+def _is_non_orm_receiver(node) -> bool:
+    """True for `.save()/.delete()` receivers that are NOT the ORM: `cache`, `request.session`,
+    `caches['default']`, storage — so we don't record them as DB writes."""
+    if isinstance(node, ast.Name):
+        return node.id in NON_ORM_RECEIVERS
+    if isinstance(node, ast.Attribute):
+        return node.attr in NON_ORM_RECEIVERS        # request.session, self.cache
+    if isinstance(node, ast.Subscript):
+        return _is_non_orm_receiver(node.value)       # caches['default']
+    return False
+
+
+def _receiver_key(node):
+    """var_types lookup key for a `.save()/.delete()` receiver: a bare name, or a dotted `self.x`."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return _dotted(node)                          # self.instance -> "self.instance"
+    return None
+
+
+def _anno_model(ann):
+    """A model name from a type annotation (`obj: EntityLock`, `models.Foo`, or a `"Foo"` forward
+    ref), or None. Uppercase-first heuristic — a builtin like `str`/`int` is ignored."""
+    if isinstance(ann, ast.Name) and ann.id[:1].isupper():
+        return ann.id
+    if isinstance(ann, ast.Attribute) and ann.attr[:1].isupper():
+        return ann.attr
+    if isinstance(ann, ast.Constant) and isinstance(ann.value, str) and ann.value[:1].isupper():
+        return ann.value.split("[", 1)[0].strip()     # "Foo" / "List[Foo]" forward refs
+    return None
 
 
 def _root_name(node):
