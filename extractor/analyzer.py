@@ -89,6 +89,8 @@ class RepoIndex:
         self.url_files: list[str] = []
         self.drf_present = False               # REST_FRAMEWORK settings seen
         self.default_permissions = None        # DEFAULT_PERMISSION_CLASSES (list) or None
+        self.module_consts: dict[str, dict] = {}   # file -> {NAME: folded string}
+        self.global_consts: dict[str, str] = {}    # repo-wide URL constants (unambiguous only)
         self._build()
 
     def _iter_py(self):
@@ -99,6 +101,7 @@ class RepoIndex:
                     yield os.path.join(dirpath, fn)
 
     def _build(self):
+        seen, ambiguous = {}, set()        # for the repo-wide constant table
         for path in self._iter_py():
             try:
                 src = open(path, encoding="utf-8").read()
@@ -109,11 +112,22 @@ class RepoIndex:
                 self.url_files.append(path)
             if "settings" in path:
                 self._scan_drf(tree)
+            mc = _module_str_consts(tree)              # this module's top-level string constants
+            self.module_consts[path] = mc
+            for name, val in mc.items():               # merge into the repo-wide table
+                if name in seen and seen[name] != val:
+                    ambiguous.add(name)                # same name, different value across files → drop
+                seen[name] = val
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     self.classes.setdefault(node.name, []).append((node, path))
                 elif isinstance(node, ast.FunctionDef):
                     self.funcs.setdefault(node.name, []).append((node, path))
+        self.global_consts = {n: v for n, v in seen.items() if n not in ambiguous}
+
+    def consts_for(self, file: str) -> dict:
+        """String constants visible in `file`: the repo-wide table, with this module's own on top."""
+        return {**self.global_consts, **self.module_consts.get(file, {})}
 
     def _scan_drf(self, tree):
         for n in ast.walk(tree):
@@ -232,7 +246,7 @@ def parse_endpoints(index: RepoIndex) -> list:
 class FactCollector(ast.NodeVisitor):
     """Walk a function body; collect lens facts. Records callees for 1-level follow."""
 
-    def __init__(self, file: str = ""):
+    def __init__(self, file: str = "", consts=None):
         self.file = file
         self.db = []           # (model, kind, file, line)
         self.external = []     # (root, dest, file, line)
@@ -242,7 +256,9 @@ class FactCollector(ast.NodeVisitor):
         self.func_calls = []   # bare names called x(...)
         self.typed_calls = []  # (ClassName, method) called as Model.method(...)
         self.var_types = {}    # local var name -> Model (so `order.save()` → Order:write)
-        self.str_vars = {}     # local var name -> resolved string (so `requests.post(url)` names the dest)
+        # local var name -> resolved string (so `requests.post(url)` names the dest); seeded with
+        # module/repo-level URL constants so an imported `requests.post(LEARN_API)` resolves too.
+        self.str_vars = dict(consts or {})
         self.tainted = {}      # local var name -> {sensitive field labels it carries}
         self.leaks = []        # (field, sink, file, line): a tainted field that reaches an egress sink
 
@@ -533,7 +549,35 @@ def _fold_str(node, str_vars: dict) -> Optional[str]:
         if left is None and right is None:            # no literal/known anchor → stay honest "?"
             return None
         return (left or _placeholder(node.left)) + (right or _placeholder(node.right))
+    if isinstance(node, ast.Call):
+        f = node.func
+        if isinstance(f, ast.Attribute) and f.attr in {"format", "strip", "rstrip", "lstrip",
+                                                        "lower", "upper"}:
+            return _fold_str(f.value, str_vars)       # URL.format(pk=pk) → keep the "…/{pk}/…" template
+        # os.getenv("X") / os.environ.get("X") / getenv("X") → {X} (the env var name, a readable host)
+        is_env = (isinstance(f, ast.Attribute) and f.attr == "getenv") \
+            or (isinstance(f, ast.Name) and f.id == "getenv") \
+            or (isinstance(f, ast.Attribute) and f.attr == "get"
+                and isinstance(f.value, ast.Attribute) and f.value.attr == "environ")
+        if is_env and node.args:
+            name = _const_str(node.args[0])
+            if name:
+                return "{" + name + "}"
     return None
+
+
+def _module_str_consts(tree, base=None):
+    """Top-level `NAME = <string>` constants in a module, folded to their static value (with
+    {placeholder} for parts like settings.X). Accumulates so `B = A + '/x'` resolves via `A`, and
+    seeds from `base` (the repo-wide table) so a constant built from an imported one resolves too."""
+    consts = dict(base or {})
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name):
+            val = _fold_str(node.value, consts)
+            if val is not None:
+                consts[node.targets[0].id] = val
+    return consts
 
 
 def _placeholder(node) -> str:
@@ -684,7 +728,7 @@ def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth):
     is tagged "(via call)" so the report stays honest about indirection.
     """
     owner_rel = _rel(index, owner_file)
-    local = FactCollector(owner_rel)
+    local = FactCollector(owner_rel, consts=index.consts_for(owner_file))
     local.visit(fn)
     if depth == 0:
         agg.db += local.db

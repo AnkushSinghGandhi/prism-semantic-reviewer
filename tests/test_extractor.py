@@ -133,6 +133,39 @@ def test_external_dest_folds_fstring_var():
     assert _external_dests(src) == ["{base}/hook"]
 
 
+def test_external_dest_resolves_format_and_getenv():
+    # URL = os.getenv('X') + '/path/{id}' ; requests.post(URL.format(id=id)) → readable, not "?"
+    src = ("import os, requests\n"
+           "BASE = os.getenv('API_URL', '')\n"
+           "URL = BASE + '/v1/item/{id}/'\n"
+           "def f(id):\n"
+           "    requests.post(URL.format(id=id))\n")
+    assert _external_dests(src) == ["{API_URL}/v1/item/{id}/"]
+
+
+def test_module_str_consts_accumulate():
+    from extractor.analyzer import _module_str_consts
+    tree = ast.parse("base = 'https://x'\nAPI = base + '/v1'\n")
+    assert _module_str_consts(tree) == {"base": "https://x", "API": "https://x/v1"}
+
+
+def test_imported_url_constant_resolves_across_modules(tmp_path):
+    # the real cnext shape: a URL constant defined in one module, imported and used in another
+    (tmp_path / "service_urls.py").write_text(
+        "import os\nBASE = os.getenv('API_URL', '')\nSET_KW = BASE + '/api/1/kw/{pk}/set/'\n")
+    (tmp_path / "settings.py").write_text(
+        "REST_FRAMEWORK = {'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.AllowAny']}\n")
+    (tmp_path / "views.py").write_text(
+        "import requests\nfrom rest_framework.views import APIView\nfrom .service_urls import SET_KW\n"
+        "class V(APIView):\n    def post(self, r, pk):\n        requests.post(SET_KW.format(pk=pk))\n        return None\n")
+    (tmp_path / "urls.py").write_text(
+        "from django.urls import path\nfrom .views import V\nurlpatterns = [path('api/v/<int:pk>', V.as_view())]\n")
+    eps = analyze_repo(str(tmp_path))
+    v = next(e for e in eps if "api/v" in e.route)
+    dests = [x.split(" -> ", 1)[-1].split(" @ ")[0] for x in v.e4_external.items]
+    assert "{API_URL}/api/1/kw/{pk}/set/" in dests     # imported constant + .format resolved
+
+
 def test_external_dest_unresolvable_stays_unknown():
     # a destination built from a function call is not guessed → honest "?"
     src = ("import requests\n"
