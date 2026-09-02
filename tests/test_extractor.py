@@ -89,6 +89,33 @@ def test_cache_and_session_ops_are_not_db_writes():
     assert _db_models(src) == set()
 
 
+def _cache_edge(src):
+    from extractor.analyzer import _score_cache
+    fc = FactCollector("m.py")
+    fc.visit(ast.parse(src))
+    agg = FactCollector("m.py")
+    agg.cache = fc.cache
+    return _score_cache(agg)
+
+
+def test_cache_lens_reads_and_writes_surface_as_e7():
+    src = ("from django.core.cache import cache\n"
+           "class H:\n"
+           "    def f(self, pk):\n"
+           "        v = cache.get('stats')\n"
+           "        cache.set('user:' + str(pk), 1)\n"
+           "        cache.delete('lock')\n")
+    e = _cache_edge(src)
+    joined = " | ".join(e.items)
+    assert "read get stats" in joined
+    assert "write set user:{pk}" in joined     # str(pk) unwrapped to {pk}
+    assert "write delete lock" in joined
+
+
+def test_cache_edge_is_na_when_no_cache_used():
+    assert _cache_edge("class H:\n    def f(self):\n        return 1\n").status == "n/a"
+
+
 def test_instance_write_resolves_via_param_annotation():
     src = ("class H:\n"
            "    def f(self, obj: EntityLock):\n"

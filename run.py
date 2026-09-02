@@ -18,7 +18,7 @@ from extractor import analyze_repo, to_dict  # noqa: E402
 
 EDGES = [("e1_route_handler", "E1 route→handler"), ("e2_auth", "E2 auth"),
          ("e3_db_tables", "E3 db"), ("e4_external", "E4 external"),
-         ("e5_async", "E5 async"), ("e6_pii", "E6 pii")]
+         ("e5_async", "E5 async"), ("e6_pii", "E6 pii"), ("e7_cache", "E7 cache")]
 STATUSES = ["✓", "⚠", "?", "n/a"]
 
 

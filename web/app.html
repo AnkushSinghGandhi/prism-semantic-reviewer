@@ -61,6 +61,7 @@
   .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
   .lg-handler::before{background:var(--link)}.lg-read::before{background:#6e7681}.lg-write::before{background:var(--high)}
   .lg-ext::before{background:var(--crit)}.lg-async::before{background:var(--purple)}
+  .lg-cache::before{background:#39c5cf}
   svg text{fill:var(--fg);font:12px ui-monospace,Menlo,monospace}
   svg .elabel{fill:#adbac7;font-size:10.5px}
   .gtools{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-4px 0 8px;flex-wrap:wrap}
@@ -466,11 +467,11 @@ function passFilters(c){
 // three filter bars: severity + change-kind (both default all-on), and touches (additive, default off)
 function renderFilters(){
   const fb=document.getElementById("filters"); fb.innerHTML="";
-  const sv={}, kd={}, op={read:0,write:0,external:0,async:0};
+  const sv={}, kd={}, op={read:0,write:0,external:0,async:0,cache:0};
   DATA.changes.forEach(c=>{
     sv[c.sev]=(sv[c.sev]||0)+1;
     const k=kindKey(c.kind); kd[k]=(kd[k]||0)+1;
-    const o=c.ops||{}; ["read","write","external","async"].forEach(x=>{ if(o[x]) op[x]++; });
+    const o=c.ops||{}; ["read","write","external","async","cache"].forEach(x=>{ if(o[x]) op[x]++; });
   });
   const mk=(label,off,fn)=>{const b=document.createElement("button");if(off)b.className="off";b.textContent=label;b.onclick=fn;return b;};
   const sep=()=>{const s=document.createElement("span");s.className="fsep";fb.appendChild(s);};
@@ -483,7 +484,7 @@ function renderFilters(){
     fb.appendChild(mk(`${t} ${kd[k]}`, !activeKind.has(k), ()=>toggle(activeKind,k)));
   });
   sep(); lbl("touches");
-  [["read","📖 read"],["write","✏ write"],["external","🌐 external"],["async","⏱ async"]].forEach(([k,t])=>{
+  [["read","📖 read"],["write","✏ write"],["external","🌐 external"],["async","⏱ async"],["cache","🗄 cache"]].forEach(([k,t])=>{
     fb.appendChild(mk(`${t} ${op[k]}`, !activeOps.has(k), ()=>toggle(activeOps,k)));
   });
   renderList();
@@ -520,7 +521,7 @@ function renderTab(c){
     b.innerHTML=`<ul class="invest">${invest}</ul>`+(unk?`<div style="margin-top:10px">${unk}</div>`:"");
   }else{
     b.innerHTML=`<div class="legend"><span class="lg-handler">handler</span><span class="lg-read">table read</span>`+
-      `<span class="lg-write">table write</span><span class="lg-ext">external</span><span class="lg-async">async</span></div>`+
+      `<span class="lg-write">table write</span><span class="lg-ext">external</span><span class="lg-async">async</span><span class="lg-cache">cache</span></div>`+
       `<div class="gtools"><span style="font-size:11.5px;color:var(--mut)">before → after: `+
       `<span style="color:var(--low);font-weight:700">+ new</span> · `+
       `<span style="color:var(--crit);font-weight:700">− removed</span> · `+
@@ -558,6 +559,7 @@ function drawGraph(g){
     if(n.type==="handler")stroke="var(--link)";
     else if(n.type==="external")stroke="var(--crit)";
     else if(n.type==="async")stroke="var(--purple)";
+    else if(n.type==="cache")stroke="#39c5cf";
     else if(n.type==="table")stroke=(n.kind||"").includes("write")?"var(--high)":"#6e7681";
     else if(n.type==="route")stroke="#8b949e";
     const st=n.state||"same";

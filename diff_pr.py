@@ -28,7 +28,7 @@ import deps as deps_mod                        # noqa: E402
 
 CRIT, HIGH, MED, LOW = "🔴", "🟠", "🟡", "🟢"
 EDGES = [("e3_db_tables", "db"), ("e4_external", "external"),
-         ("e5_async", "async"), ("e6_pii", "pii")]
+         ("e5_async", "async"), ("e6_pii", "pii"), ("e7_cache", "cache")]
 
 INFO_URI = "https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer"
 # GitHub code-scanning alert level per Pryti severity tier.
@@ -87,6 +87,8 @@ def _resources(ep):
         res.add("ext:" + x.split(" -> ", 1)[-1])
     for a in items(ep, "e5_async"):
         res.add("async:" + a)
+    for c in items(ep, "e7_cache"):
+        res.add("cache:" + c.split(" ", 2)[-1])   # shared cache key → related endpoints
     return res
 
 
@@ -239,6 +241,9 @@ def flow(ep):
     ext = sorted(items(ep, "e4_external"))
     if ext:
         parts.append("ext: " + ", ".join(ext))
+    ca = sorted(items(ep, "e7_cache"))
+    if ca:
+        parts.append("cache: " + ", ".join(ca))
     return " → ".join(parts)
 
 
@@ -258,7 +263,8 @@ def ops_of(ep):
     return {"read": any(k.startswith("read") for k in kinds),
             "write": any(k.startswith("write") for k in kinds),
             "external": bool(items(ep, "e4_external")),
-            "async": bool(items(ep, "e5_async"))}
+            "async": bool(items(ep, "e5_async")),
+            "cache": bool(items(ep, "e7_cache"))}
 
 
 def diff(base_eps, head_eps):
@@ -321,6 +327,10 @@ def diff(base_eps, head_eps):
                 writes = [t for t in new if ":write" in t]
                 sub.append((MED if not (writes and is_open(h)) else CRIT,
                             f"new DB {'write' if writes else 'access'}: {', '.join(sorted(new))}"))
+            elif label == "cache":
+                invalidates = any(t.startswith("write") for t in new)
+                sub.append((LOW, f"new cache {'invalidation/write' if invalidates else 'read'}: "
+                                 f"{', '.join(sorted(new))}"))
             else:
                 sub.append((MED, f"new async dispatch: {', '.join(sorted(new))}"))
         if sub:
@@ -622,6 +632,8 @@ def build_graph(ep):
             if ntype == "table":
                 label, _, k = clean.partition(":")
                 kind = k
+            elif ntype == "cache":
+                kind, _, label = clean.partition(" ")   # "write set user:{pk}" → kind=write, label="set user:{pk}"
             else:
                 label = clean.split(" -> ", 1)[-1]
                 kind = kind_of
@@ -632,6 +644,7 @@ def build_graph(ep):
     leaf(ep.e3_db_tables.items, "table", "")
     leaf(ep.e4_external.items, "external", "calls")
     leaf(ep.e5_async.items, "async", "dispatches")
+    leaf(ep.e7_cache.items, "cache", "")
     return {"nodes": nodes, "edges": edges}
 
 

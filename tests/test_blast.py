@@ -3,8 +3,8 @@ import diff_pr
 from extractor.analyzer import Endpoint, Edge, VERIFIED, UNKNOWN, NA
 
 
-def mk(route, handler, *, auth="?", tables=(), ext=(), pii=False):
-    """A minimal but complete Endpoint (all six edges set) for exercising diff()."""
+def mk(route, handler, *, auth="?", tables=(), ext=(), pii=False, cache=()):
+    """A minimal but complete Endpoint (all seven edges set) for exercising diff()."""
     ep = Endpoint(route=route, handler=handler, file="v.py", line=1, methods=["POST"])
     ep.e1_route_handler = Edge(VERIFIED, [f"{handler} @ v.py:1"])
     ep.e2_auth = Edge(UNKNOWN) if auth == "?" else Edge(VERIFIED, [auth])
@@ -12,6 +12,7 @@ def mk(route, handler, *, auth="?", tables=(), ext=(), pii=False):
     ep.e4_external = Edge(VERIFIED, [f"{x} @ v.py:3" for x in ext]) if ext else Edge(NA)
     ep.e5_async = Edge(NA)
     ep.e6_pii = Edge(VERIFIED, ["email @ v.py:4"]) if pii else Edge(NA)
+    ep.e7_cache = Edge(VERIFIED, [f"{c} @ v.py:5" for c in cache]) if cache else Edge(NA)
     return ep
 
 

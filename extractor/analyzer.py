@@ -42,6 +42,11 @@ NON_ORM_RECEIVERS = {"cache", "caches", "session", "storage", "default_storage",
 # table named "FooSerializer"). We resolve these to Meta.model when known, else fall back to unknown.
 NON_MODEL_SUFFIXES = ("Serializer", "Form")
 
+# Django cache ops — surfaced as the E7 cache lens (read vs mutate/invalidate), not DB writes.
+CACHE_READ = {"get", "get_many", "has_key", "keys", "ttl"}
+CACHE_WRITE = {"set", "set_many", "add", "delete", "delete_many", "clear",
+               "incr", "decr", "touch", "get_or_set"}
+
 # sensitive attribute names for the PII edge
 SENSITIVE = {"email", "phone", "mobile", "password", "ssn", "aadhaar", "aadhar",
              "pan", "card", "card_number", "address", "dob", "date_of_birth",
@@ -79,6 +84,7 @@ class Endpoint:
     e4_external: Edge = None
     e5_async: Edge = None
     e6_pii: Edge = None
+    e7_cache: Edge = None
 
 
 # ---- repo index ----------------------------------------------------------------------
@@ -261,6 +267,7 @@ class FactCollector(ast.NodeVisitor):
         self.external = []     # (root, dest, file, line)
         self.async_ = []       # (mechanism, target, file, line)
         self.pii = []          # (attr, file, line)
+        self.cache = []        # (kind, detail, file, line): cache read / mutate (E7)
         self.self_calls = []   # method names called as self.x(...)
         self.func_calls = []   # bare names called x(...)
         self.typed_calls = []  # (ClassName, method) called as Model.method(...)
@@ -291,6 +298,12 @@ class FactCollector(ast.NodeVisitor):
             if who and who.endswith(NON_MODEL_SUFFIXES):     # a serializer/form we couldn't map → unknown
                 who = None
             self.db.append((who or "<instance>", "write", fl, ln))
+        # cache read / mutate (E7): cache.get(k) / cache.set(k, …) / cache.delete(k) / caches['x'].clear()
+        if isinstance(f, ast.Attribute) and _is_cache_receiver(f.value) \
+                and f.attr in (CACHE_READ | CACHE_WRITE):
+            kind = "read" if f.attr in CACHE_READ else "write"
+            detail = f"{f.attr} {_cache_key(node, self.str_vars)}".strip()
+            self.cache.append((kind, detail, fl, ln))
         # external calls
         if isinstance(f, ast.Attribute):
             root = _root_name(f.value)
@@ -473,6 +486,24 @@ def _is_non_orm_receiver(node) -> bool:
     return False
 
 
+def _is_cache_receiver(node) -> bool:
+    """True for a Django cache receiver: `cache`, `caches['default']`, or `self.cache`."""
+    if isinstance(node, ast.Name):
+        return node.id in {"cache", "caches"}
+    if isinstance(node, ast.Attribute):
+        return node.attr in {"cache", "caches"}
+    if isinstance(node, ast.Subscript):
+        return _is_cache_receiver(node.value)
+    return False
+
+
+def _cache_key(node: ast.Call, str_vars: dict) -> str:
+    """The cache key (first arg) folded to a string, `{var}` if it's a variable, or '' if none."""
+    if not node.args:
+        return ""
+    return _fold_str(node.args[0], str_vars) or _placeholder(node.args[0])
+
+
 def _receiver_key(node):
     """var_types lookup key for a `.save()/.delete()` receiver: a bare name, or a dotted `self.x`."""
     if isinstance(node, ast.Name):
@@ -563,6 +594,8 @@ def _fold_str(node, str_vars: dict) -> Optional[str]:
         return (left or _placeholder(node.left)) + (right or _placeholder(node.right))
     if isinstance(node, ast.Call):
         f = node.func
+        if isinstance(f, ast.Name) and f.id in {"str", "int"} and node.args:
+            return _fold_str(node.args[0], str_vars) or _placeholder(node.args[0])   # str(pk) → {pk}
         if isinstance(f, ast.Attribute) and f.attr in {"format", "strip", "rstrip", "lstrip",
                                                         "lower", "upper"}:
             return _fold_str(f.value, str_vars)       # URL.format(pk=pk) → keep the "…/{pk}/…" template
@@ -699,7 +732,7 @@ def analyze_handler(name: str, index: RepoIndex) -> Endpoint:
         fn, ffile = index.find_func(name)
         if fn is None:
             ep.e1_route_handler = Edge(UNKNOWN, note="handler not found in repo")
-            for a in ("e2_auth", "e3_db_tables", "e4_external", "e5_async", "e6_pii"):
+            for a in ("e2_auth", "e3_db_tables", "e4_external", "e5_async", "e6_pii", "e7_cache"):
                 setattr(ep, a, Edge(UNKNOWN))
             return ep
         ep.file, ep.line, ep.methods = _rel(index, ffile), fn.lineno, ["<func>"]
@@ -742,6 +775,7 @@ def analyze_handler(name: str, index: RepoIndex) -> Endpoint:
     ep.e4_external = _score_external(agg)
     ep.e5_async = _score_async(agg)
     ep.e6_pii = _score_pii(agg)
+    ep.e7_cache = _score_cache(agg)
     return ep
 
 
@@ -808,6 +842,7 @@ def _tag_indirect(agg, sub):
     agg.db += [(m, k + "*", f, ln) for (m, k, f, ln) in sub.db]
     agg.external += [(r, d + " (via call)", f, ln) for (r, d, f, ln) in sub.external]
     agg.async_ += [(mech + " (via call)", t, f, ln) for (mech, t, f, ln) in sub.async_]
+    agg.cache += [(k + "*", d, f, ln) for (k, d, f, ln) in sub.cache]
     agg.pii += sub.pii
     agg.leaks += sub.leaks     # a leak fully inside a helper is still an intra-procedural leak
 
@@ -861,6 +896,20 @@ def _score_async(agg) -> Edge:
         _first_loc(seen, f"{mech} -> {t}", f, ln)
     items = [f"{fact} @ {loc}" for fact, loc in seen.items()]
     return Edge(POTENTIAL, items, note="pattern-detected; not in a Celery-only view")
+
+
+def _score_cache(agg) -> Edge:
+    if not agg.cache:
+        return Edge(NA)
+    seen, indirect, unk = {}, False, False
+    for kind, detail, f, ln in agg.cache:
+        ind = kind.endswith("*")
+        indirect = indirect or ind
+        unk = unk or "{" in detail or detail.endswith(" ?")   # key not fully pinned down
+        _first_loc(seen, f"{kind.rstrip('*')} {detail}{' (via call)' if ind else ''}", f, ln)
+    items = [f"{fact} @ {loc}" for fact, loc in seen.items()]
+    status = POTENTIAL if (indirect or unk) else VERIFIED
+    return Edge(status, items, note="via helper" if indirect else "")
 
 
 PERSON_MODELS = {"User", "Profile", "UserProfile", "Student", "Customer", "Account",

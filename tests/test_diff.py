@@ -11,7 +11,8 @@ from diff_pr import (diff, parse_changed_lines, build_review, build_sarif, inten
 
 def _ep(route, ext_items):
     E = lambda its: SimpleNamespace(items=its)
-    return SimpleNamespace(route=route, e3_db_tables=E([]), e4_external=E(ext_items), e5_async=E([]))
+    return SimpleNamespace(route=route, e3_db_tables=E([]), e4_external=E(ext_items),
+                           e5_async=E([]), e7_cache=E([]))
 
 
 def test_new_unauth_write_endpoint_is_critical():
@@ -215,7 +216,7 @@ def test_ops_of_flags_read_write_external_async():
     from diff_pr import ops_of
     by = {e.route: ops_of(e) for e in analyze_repo(BLOG)}
     orders = next(v for k, v in by.items() if "api/orders" in k)
-    assert orders == {"read": True, "write": True, "external": True, "async": True}
+    assert orders["read"] and orders["write"] and orders["external"] and orders["async"]
     stats = next(v for k, v in by.items() if "api/stats" in k)
     assert stats["read"] and not stats["write"] and not stats["external"]
     ow = next(v for k, v in by.items() if "open-write" in k)
@@ -227,7 +228,7 @@ def test_review_payload_carries_ops():
     base = [e for e in head if "open-write" not in e.route]
     meta = dict(title="t", base="b", head="h", shortstat="")
     rv = build_review(diff(base, head), [], meta, changed={})
-    assert all("ops" in c and set(c["ops"]) == {"read", "write", "external", "async"}
+    assert all("ops" in c and set(c["ops"]) == {"read", "write", "external", "async", "cache"}
                for c in rv["changes"])
 
 
