@@ -651,6 +651,14 @@ def build_graph(ep):
     leaf(ep.e4_external.items, "external", "calls")
     leaf(ep.e5_async.items, "async", "dispatches")
     leaf(ep.e7_cache.items, "cache", "")
+    # hang the real SQL table off each model node — Model → db table
+    for model, info in (getattr(ep, "tables", {}) or {}).items():
+        mnid = f"table:{model}"
+        if mnid in ids:
+            tnid = f"dbtable:{info['table']}"
+            add(tnid, info["table"], "dbtable", explicit=info.get("explicit", True))
+            edges.append({"from": mnid, "to": tnid,
+                          "kind": "table" if info.get("explicit", True) else "table (convention)"})
     return {"nodes": nodes, "edges": edges}
 
 

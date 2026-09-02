@@ -85,6 +85,7 @@ class Endpoint:
     e5_async: Edge = None
     e6_pii: Edge = None
     e7_cache: Edge = None
+    tables: dict = field(default_factory=dict)   # model -> {"table": name, "explicit": bool}
 
 
 # ---- repo index ----------------------------------------------------------------------
@@ -103,6 +104,7 @@ class RepoIndex:
         self.global_consts: dict[str, str] = {}    # repo-wide URL constants (unambiguous only)
         self.class_models: dict[str, str] = {}     # Serializer/Form/etc. name -> its Meta.model table
         self.perm_consts: dict[str, list] = {}     # PERMISSION_CONSTANT -> [class names] (unambiguous)
+        self.model_tables: dict[str, str] = {}     # Model -> explicit Meta.db_table (SQL table name)
         self._build()
 
     def _iter_py(self):
@@ -150,6 +152,9 @@ class RepoIndex:
                 m = _class_meta_model(child)                  # DRF/Django `class Meta: model = X`
                 if m:
                     self.class_models[child.name] = m
+                t = _class_db_table(child)                    # Django `class Meta: db_table = '...'`
+                if t:
+                    self.model_tables[child.name] = t
                 self._index_defs(child, path)                 # into class body (methods, Meta)
             elif isinstance(child, ast.FunctionDef):
                 self.funcs.setdefault(child.name, []).append((child, path))
@@ -160,6 +165,19 @@ class RepoIndex:
     def consts_for(self, file: str) -> dict:
         """String constants visible in `file`: the repo-wide table, with this module's own on top."""
         return {**self.global_consts, **self.module_consts.get(file, {})}
+
+    def table_for(self, model: str):
+        """(table, explicit) for a model: its declared `Meta.db_table` if present (explicit=True),
+        else Django's default `{app_label}_{model_lower}` from where the class lives (explicit=False),
+        or (None, False) if the model isn't in the repo."""
+        if model in self.model_tables:
+            return self.model_tables[model], True
+        defs = self.classes.get(model)
+        if defs:
+            app = _app_label(defs[0][1])
+            if app:
+                return f"{app}_{model.lower()}", False
+        return None, False
 
     def _scan_drf(self, tree):
         for n in ast.walk(tree):
@@ -278,9 +296,10 @@ def parse_endpoints(index: RepoIndex) -> list:
 class FactCollector(ast.NodeVisitor):
     """Walk a function body; collect lens facts. Records callees for 1-level follow."""
 
-    def __init__(self, file: str = "", consts=None, class_models=None):
+    def __init__(self, file: str = "", consts=None, class_models=None, self_type=None):
         self.file = file
         self.class_models = class_models or {}   # Serializer/Form name -> its Meta.model table
+        self.self_type = self_type               # enclosing class, so `self.objects.x()` names its table
         self.db = []           # (model, kind, file, line)
         self.external = []     # (root, dest, file, line)
         self.async_ = []       # (mechanism, target, file, line)
@@ -305,6 +324,8 @@ class FactCollector(ast.NodeVisitor):
         # ORM:  <Model>.objects.<method>(...)  and chained querysets
         model, method = _orm_model_method(f)
         if model and method:
+            if model in ("self", "cls"):                 # `self.objects.x()` in a model method →
+                model = self.self_type or "<instance>"   # the enclosing class, not a table named "self"
             kind = "write" if method in ORM_WRITE else ("read" if method in ORM_READ else "read")
             self.db.append((model, kind, fl, ln))
         # instance .save()/.delete() — resolve `var.save()` to its model when we know the type,
@@ -664,6 +685,28 @@ def _class_meta_model(classdef):
     return None
 
 
+def _class_db_table(classdef):
+    """The explicit `db_table = '...'` inside a model's inner `class Meta:` — the real SQL table
+    name. Returns the table string or None (then callers fall back to Django's app_label_model)."""
+    for n in classdef.body:
+        if isinstance(n, ast.ClassDef) and n.name == "Meta":
+            for s in n.body:
+                if isinstance(s, ast.Assign) and any(
+                        isinstance(t, ast.Name) and t.id == "db_table" for t in s.targets):
+                    return _const_str(s.value)
+    return None
+
+
+def _app_label(path):
+    """Django app label from a file path: the segment right under an `apps/` directory, else None."""
+    parts = path.replace("\\", "/").split("/")
+    if "apps" in parts:
+        i = parts.index("apps")
+        if i + 1 < len(parts):
+            return parts[i + 1]
+    return None
+
+
 def _module_str_consts(tree, base=None):
     """Top-level `NAME = <string>` constants in a module, folded to their static value (with
     {placeholder} for parts like settings.X). Accumulates so `B = A + '/x'` resolves via `A`, and
@@ -816,28 +859,35 @@ def analyze_handler(name: str, index: RepoIndex) -> Endpoint:
     followed = set()
     same_module_classmethods = {m.name: m for m in (cls.body if cls else []) if isinstance(m, ast.FunctionDef)}
     for m in methods:
-        _walk_follow(m, agg, index, owner_file, same_module_classmethods, followed, depth=0)
+        _walk_follow(m, agg, index, owner_file, same_module_classmethods, followed, depth=0,
+                     self_type=(name if cls is not None else None))
 
     ep.e3_db_tables = _score_db(agg)
     ep.e4_external = _score_external(agg)
     ep.e5_async = _score_async(agg)
     ep.e6_pii = _score_pii(agg)
     ep.e7_cache = _score_cache(agg)
+    # resolve each touched model to its real SQL table (declared db_table, else app convention)
+    for model in {m for m, _k, _f, _l in agg.db if m and m != "<instance>"}:
+        tbl, explicit = index.table_for(model)
+        if tbl:
+            ep.tables[model] = {"table": tbl, "explicit": explicit}
     return ep
 
 
 MAX_FOLLOW_DEPTH = 2   # handler(0) → helper(1) → helper's helper(2). Capped: deeper loses precision.
 
 
-def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth):
+def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth, self_type=None):
     """Collect facts in `fn`; recurse up to MAX_FOLLOW_DEPTH into the functions it calls.
 
     Facts in the handler itself (depth 0) are direct; anything reached through a call (depth ≥ 1)
-    is tagged "(via call)" so the report stays honest about indirection.
+    is tagged "(via call)" so the report stays honest about indirection. `self_type` is the class
+    `fn` belongs to, so a `self.objects.x()` inside it resolves to that class's table.
     """
     owner_rel = _rel(index, owner_file)
     local = FactCollector(owner_rel, consts=index.consts_for(owner_file),
-                          class_models=index.class_models)
+                          class_models=index.class_models, self_type=self_type)
     local.visit(fn)
     if depth == 0:
         agg.db += local.db
@@ -850,14 +900,15 @@ def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth):
     if depth >= MAX_FOLLOW_DEPTH:
         return
 
-    # self.method(...) — resolve against the current class's own methods
+    # self.method(...) — resolve against the current class's own methods (same self_type)
     for mname in set(local.self_calls):
         key = f"self:{owner_rel}:{mname}"
         if mname in classmethods and key not in followed:
             followed.add(key)
-            _walk_follow(classmethods[mname], agg, index, owner_file, classmethods, followed, depth + 1)
+            _walk_follow(classmethods[mname], agg, index, owner_file, classmethods, followed,
+                         depth + 1, self_type=self_type)
 
-    # module-level func(...) defined in the repo
+    # module-level func(...) defined in the repo (no `self`)
     for fname in set(local.func_calls):
         key = f"func:{fname}"
         if key in followed:
@@ -881,7 +932,7 @@ def _walk_follow(fn, agg, index, owner_file, classmethods, followed, depth):
             continue
         followed.add(key)
         cls_methods = {m.name: m for m in cls.body if isinstance(m, ast.FunctionDef)}
-        _walk_follow(method, agg, index, cfile, cls_methods, followed, depth + 1)
+        _walk_follow(method, agg, index, cfile, cls_methods, followed, depth + 1, self_type=cname)
 
 
 def _tag_indirect(agg, sub):

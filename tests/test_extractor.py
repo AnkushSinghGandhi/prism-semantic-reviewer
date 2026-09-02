@@ -163,6 +163,23 @@ def test_instance_write_resolves_via_self_attr_and_tuple():
     assert _db_models(src) == {"Widget", "Gadget"}
 
 
+def test_model_db_table_resolves_declared_and_convention(tmp_path):
+    # each model resolves to its real SQL table: declared Meta.db_table, else app_label_model
+    app = tmp_path / "apps" / "shop"
+    app.mkdir(parents=True)
+    (app / "models.py").write_text(
+        "class Thing(models.Model):\n    class Meta:\n        db_table = 'custom_thing'\n"
+        "class Plain(models.Model):\n    pass\n")
+    (app / "views.py").write_text(
+        "from rest_framework.views import APIView\n"
+        "class V(APIView):\n    def get(self, r):\n        Thing.objects.all()\n        Plain.objects.all()\n        return None\n")
+    (app / "urls.py").write_text(
+        "from django.urls import path\nfrom .views import V\nurlpatterns = [path('v', V.as_view())]\n")
+    ep = next(e for e in analyze_repo(str(tmp_path)) if e.route == "v")
+    assert ep.tables["Thing"] == {"table": "custom_thing", "explicit": True}      # declared
+    assert ep.tables["Plain"] == {"table": "shop_plain", "explicit": False}       # Django convention
+
+
 def test_serializer_save_resolves_to_meta_model_not_class():
     # `s = WebinarSerializer(...); s.save()` writes to the serializer's Meta.model, not a
     # table named "WebinarSerializer"
@@ -181,6 +198,29 @@ def test_unmapped_serializer_is_unknown_not_a_fake_table():
                        "    def f(self):\n"
                        "        s = MysterySerializer(data=1)\n"
                        "        s.save()\n"))
+    assert {m for m, _k, _f, _l in fc.db} == {"<instance>"}
+
+
+def test_self_objects_resolves_to_enclosing_model(tmp_path):
+    # `cls.objects.filter()` inside a model method → the model's table, not a fake table named "self"
+    (tmp_path / "models.py").write_text(
+        "class Question(models.Model):\n"
+        "    class Meta:\n        db_table = 'questions'\n"
+        "    @classmethod\n    def recent(cls):\n        return cls.objects.filter(active=1)\n")
+    (tmp_path / "views.py").write_text(
+        "from rest_framework.views import APIView\n"
+        "class V(APIView):\n    def get(self, r):\n        Question.recent()\n        return None\n")
+    (tmp_path / "urls.py").write_text(
+        "from django.urls import path\nfrom .views import V\nurlpatterns = [path('v', V.as_view())]\n")
+    v = next(e for e in analyze_repo(str(tmp_path)) if e.route == "v")
+    models = {x.split(":")[0] for x in v.e3_db_tables.items}
+    assert "Question" in models and "self" not in models and "cls" not in models
+
+
+def test_self_objects_unknown_enclosing_is_instance_not_self():
+    # no enclosing class known → honest <instance>, never a table literally named "self"
+    fc = FactCollector("m.py", self_type=None)
+    fc.visit(ast.parse("class H:\n    def f(self):\n        self.objects.all()\n"))
     assert {m for m, _k, _f, _l in fc.db} == {"<instance>"}
 
 

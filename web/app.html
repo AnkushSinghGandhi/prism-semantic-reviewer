@@ -62,7 +62,7 @@
   .legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
   .lg-handler::before{background:var(--link)}.lg-read::before{background:#6e7681}.lg-write::before{background:var(--high)}
   .lg-ext::before{background:var(--crit)}.lg-async::before{background:var(--purple)}
-  .lg-cache::before{background:#39c5cf}
+  .lg-cache::before{background:#39c5cf}.lg-dbtable::before{background:#57ab5a}
   svg text{fill:var(--fg);font:12px ui-monospace,Menlo,monospace}
   svg .elabel{fill:#adbac7;font-size:10.5px}
   .gtools{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:-4px 0 8px;flex-wrap:wrap}
@@ -565,7 +565,7 @@ function renderTab(c){
     b.innerHTML=`<ul class="invest">${invest}</ul>`+(unk?`<div style="margin-top:10px">${unk}</div>`:"");
   }else{
     b.innerHTML=`<div class="legend"><span class="lg-handler">handler</span><span class="lg-read">table read</span>`+
-      `<span class="lg-write">table write</span><span class="lg-ext">external</span><span class="lg-async">async</span><span class="lg-cache">cache</span></div>`+
+      `<span class="lg-write">table write</span><span class="lg-ext">external</span><span class="lg-async">async</span><span class="lg-cache">cache</span><span class="lg-dbtable">SQL table</span></div>`+
       `<div class="gtools"><span style="font-size:11.5px;color:var(--mut)">before → after: `+
       `<span style="color:var(--low);font-weight:700">+ new</span> · `+
       `<span style="color:var(--crit);font-weight:700">− removed</span> · `+
@@ -581,7 +581,8 @@ function renderTab(c){
 function drawGraph(g){
   const byType=t=>g.nodes.filter(n=>n.type===t);
   const route=byType("route"), handler=byType("handler");
-  const leaves=g.nodes.filter(n=>!["route","handler"].includes(n.type));
+  const leaves=g.nodes.filter(n=>!["route","handler","dbtable"].includes(n.type));
+  const dbt=byType("dbtable");
   const rowH=44, top=24, colR=16, boxH=26, LABELGAP=130;
   const w=(lbl)=>Math.min(260,Math.max(90,clip(lbl,34).length*7.2+22));  // wider boxes
   const maxW=list=>list.reduce((m,n)=>Math.max(m,w(n.label)),90);
@@ -597,6 +598,10 @@ function drawGraph(g){
   // handler = old+new), stack them so their boxes never overlap
   const place=(list,x)=>{const s=yMid-(list.length-1)*rowH/2; list.forEach((n,i)=>pos[n.id]=[x,s+i*rowH]);};
   place(route,colR); place(handler,colH); place(leaves,colL);
+  // dbtable nodes sit in a 4th column, each aligned to its parent model's row (Model → table)
+  const colT=colL+maxW(leaves)+90;
+  dbt.forEach(n=>{ const pe=g.edges.find(e=>e.to===n.id);
+    pos[n.id]=[colT, (pe&&pos[pe.from])?pos[pe.from][1]:yMid]; });
   function nodeSvg(n){
     const [x,y]=pos[n.id], ww=w(n.label);
     let stroke="#6e7681";
@@ -604,6 +609,7 @@ function drawGraph(g){
     else if(n.type==="external")stroke="var(--crit)";
     else if(n.type==="async")stroke="var(--purple)";
     else if(n.type==="cache")stroke="#39c5cf";
+    else if(n.type==="dbtable")stroke=n.explicit===false?"#8b6f3f":"#57ab5a";  // declared=green, convention=muted
     else if(n.type==="table")stroke=(n.kind||"").includes("write")?"var(--high)":"#6e7681";
     else if(n.type==="route")stroke="#8b949e";
     const st=n.state||"same";
@@ -623,7 +629,8 @@ function drawGraph(g){
     const x1=s[0]+w(g.nodes.find(n=>n.id===e.from).label), y1=s[1], x2=t[0], y2=t[1];
     const mx=(x1+x2)/2;
     const col=e.kind&&e.kind.includes("write")?"var(--high)":
-      e.kind==="calls"?"var(--crit)":e.kind==="dispatches"?"var(--purple)":"#6e7681";
+      e.kind==="calls"?"var(--crit)":e.kind==="dispatches"?"var(--purple)":
+      (e.kind&&e.kind.startsWith("table"))?"#57ab5a":"#6e7681";
     const st=e.state||"same";
     const lineOp=st==="same"?0.3:(st==="removed"?0.55:0.95);
     const labelOp=st==="same"?0.7:(st==="removed"?0.75:1);
@@ -636,7 +643,7 @@ function drawGraph(g){
     return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" fill="none" stroke="${col}" stroke-width="${sw}" opacity="${lineOp}" ${dash}/>`+
       `<text class="elabel" x="${lx}" y="${ly}" text-anchor="${anchor}" opacity="${labelOp}">${esc(e.kind||"")}</text>`;
   }
-  const width=colL+maxW(leaves)+24;
+  const width=(dbt.length?colT+maxW(dbt):colL+maxW(leaves))+24;
   return `<svg width="100%" viewBox="0 0 ${width} ${H}" style="width:${Math.round(100*graphZoom)}%;max-width:${Math.round(width*graphZoom)}px">`+
     g.edges.map(edgeSvg).join("")+g.nodes.map(nodeSvg).join("")+`</svg>`;
 }
