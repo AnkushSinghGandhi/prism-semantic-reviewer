@@ -57,11 +57,14 @@ def make_handler(cfg):
 
         def _send(self, code, body, ctype):
             data = body if isinstance(body, bytes) else body.encode("utf-8")
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.send_response(code)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionError):
+                pass   # client disconnected before we finished (refresh / navigated away) — ignore
 
         def _json(self, code, obj):
             self._send(code, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8")
@@ -157,6 +160,8 @@ def make_handler(cfg):
                     return self._json(200, {"repo": repo, "id": inv_id, "result": result,
                                             "text": inv_mod.render_blame(result, inv_id, g("route"))})
                 return self._json(404, {"error": "not found"})
+            except (BrokenPipeError, ConnectionError):
+                return   # client went away mid-request — don't try to write a 500 to a dead socket
             except Exception as e:
                 traceback.print_exc()
                 return self._json(500, {"error": str(e)})
@@ -201,6 +206,8 @@ def make_handler(cfg):
                                             "confirmed_ids": [c["id"] for c in merged
                                                               if c.get("confirmed")]})
                 return self._json(404, {"error": "not found"})
+            except (BrokenPipeError, ConnectionError):
+                return   # client went away mid-request — don't try to write a 500 to a dead socket
             except Exception as e:
                 traceback.print_exc()
                 return self._json(500, {"error": str(e)})
