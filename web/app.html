@@ -135,6 +135,13 @@
     <button onclick="loadInvariants()" title="Discover & confirm the rules this codebase follows">⚖ Invariants</button>
   </div>
   <div class="bar">
+    <span class="lbl mono">branch</span>
+    <select id="curBranch" class="ref"><option value="">— current branch —</option></select>
+    <span class="arrow">vs</span>
+    <span class="lbl mono" id="defBranch" title="the branch this is reviewed against">default</span>
+    <button onclick="reviewCurrentBranch()" title="Review the selected branch against the repo's default branch">Review</button>
+  </div>
+  <div class="bar">
     <span class="lbl mono">PR</span>
     <select id="pr"><option value="">— pick a merged PR —</option></select>
     <button onclick="reviewPR()">Review</button>
@@ -187,7 +194,7 @@
 const SEV={"🔴":"crit","🟠":"high","🟡":"med","🟢":"low"};
 const COL={crit:"var(--crit)",high:"var(--high)",med:"var(--med)",low:"var(--low)"};
 const active=new Set(["🔴","🟠","🟡","🟢"]);
-let DATA=null, sel=null, tab="graph", graphZoom=1;
+let DATA=null, sel=null, tab="graph", graphZoom=1, REFS=null;
 
 // path-relative base so it works at "/" or under a sub-path like "/pryti"; token from URL
 const BASE=location.pathname.endsWith("/")?location.pathname:location.pathname+"/";
@@ -300,6 +307,7 @@ async function loadRepo(){
       getJSON(apiURL("api/prs",{repo})).catch(()=>({prs:[]})),  // a repo may simply have no merges
       getJSON(apiURL("api/refs",{repo})),
     ]);
+    REFS=refs;
     fillPRs(prs.prs||[]);
     fillRefs(refs.branches||[], refs.commits||[]);
     status(`Loaded ${(prs.prs||[]).length} PRs · ${(refs.branches||[]).length} branches · `+
@@ -319,6 +327,11 @@ function fillRefs(branches, commits){
   const bopt=branches.map(b=>`<option value="${esc(b)}">${esc(b)}</option>`).join("");
   document.getElementById("baseBranch").innerHTML='<option value="">— base branch —</option>'+bopt;
   document.getElementById("headBranch").innerHTML='<option value="">— compare branch —</option>'+bopt;
+  // single-branch "review vs default" picker — defaults to the repo's checked-out branch
+  const cur=(REFS&&REFS.current)||"", def=(REFS&&REFS.default)||"";
+  document.getElementById("curBranch").innerHTML='<option value="">— current branch —</option>'+bopt;
+  if(cur) setVal("curBranch", cur);
+  document.getElementById("defBranch").textContent = def || "default (auto)";
   const copt=commits.map(c=>`<option value="${esc(c.sha)}">${esc(c.sha)} · ${esc(clip(c.title,52))}</option>`).join("");
   document.getElementById("baseCommit").innerHTML='<option value="">— base commit —</option>'+copt;
   document.getElementById("headCommit").innerHTML='<option value="">— compare commit —</option>'+copt;
@@ -333,6 +346,16 @@ function clearRefs(){["prnum","commit","base","head"].forEach(id=>setVal(id,""))
 function reviewPR(){
   if(!val("pr")){status("Pick a PR from the list first.");return;}
   clearRefs(); review();
+}
+// review the *selected* branch against the repo's default branch (switch which branch is "current")
+function reviewCurrentBranch(){
+  const h=val("curBranch");
+  if(!h){status("Pick a branch to review.");return;}
+  const def=(REFS&&REFS.default)||"";
+  setVal("pr",""); clearRefs();
+  if(!def){status("Couldn't detect the default branch — use the branches row to pick base + head.");return;}
+  if(def===h||def.endsWith("/"+h)){status(`“${h}” is the default branch — pick a feature branch to review.`);return;}
+  setVal("base",def); setVal("head",h); review();
 }
 function compareBranches(){
   const b=val("baseBranch"), h=val("headBranch");

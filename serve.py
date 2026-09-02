@@ -26,7 +26,8 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import diff_pr           # noqa: E402
 import invariants as inv_mod                          # noqa: E402
-from gitutil import is_url, git_toplevel, ensure_local  # noqa: E402
+from gitutil import (is_url, git_toplevel, ensure_local,   # noqa: E402
+                     current_branch, default_branch)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CACHE = {}       # (repo, merge, base, head, pr, inv) -> review
@@ -111,9 +112,12 @@ def make_handler(cfg):
                         return self._json(400, {"error": "no repo given"})
                     if not self._repo_ok(repo):
                         return self._json(403, {"error": "repo not in allowlist"})
+                    local = ensure_local(repo)
                     return self._json(200, {"repo": repo,
                                             "branches": diff_pr.list_branches(repo),
-                                            "commits": diff_pr.list_commits(repo, int(g("n", "50")))})
+                                            "commits": diff_pr.list_commits(repo, int(g("n", "50"))),
+                                            "current": current_branch(local),
+                                            "default": default_branch(local)})
                 if path == "/api/review":
                     repo = g("repo") or cfg["repo"]
                     if not self._repo_ok(repo):
