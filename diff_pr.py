@@ -108,6 +108,55 @@ def blast_radius(ep, idx):
     return len(reached)
 
 
+def shared_external_destinations(eps, min_routes=2):
+    """External destinations reached by several endpoints — the egress fan-in, most-shared first.
+    Collapses the 'N endpoints funnel through the same destination' case (usually one shared helper)
+    into a single group, so a reviewer verifies a destination once instead of once per route. Each
+    group is `(dest, [routes])`."""
+    idx = fanin_index(eps)
+    groups = [(res[len("ext:"):], sorted(routes))
+              for res, routes in idx.items()
+              if res.startswith("ext:") and len(routes) >= min_routes]
+    groups.sort(key=lambda g: (-len(g[1]), g[0]))
+    return groups
+
+
+def _egress_status(dest):
+    """How pinned-down a shared destination is: a {placeholder} host is 'partial', a bare '?' is
+    'unresolved', anything else is 'ok' (a full literal). Same honesty as the E4 edge status."""
+    if "{" in dest:
+        return "partial"
+    if dest.strip() == "?":
+        return "unresolved"
+    return "ok"
+
+
+def egress_payload(groups, only_routes=None):
+    """Structured shared-egress groups for the JSON/web outputs: one entry per destination reached
+    by ≥2 endpoints, `{dest, routes, count, status}`. `only_routes` keeps just the groups the change
+    participates in (PR view); None keeps all (full-repo view)."""
+    return [{"dest": dest, "routes": routes, "count": len(routes), "status": _egress_status(dest)}
+            for dest, routes in groups
+            if only_routes is None or (set(routes) & only_routes)]
+
+
+def render_egress_section(groups, only_routes=None, cap=8):
+    """Markdown for the shared-egress groups. `only_routes` keeps just groups touching those routes
+    (so a PR report shows only egress the change participates in); None shows all (full-repo view)."""
+    rows = egress_payload(groups, only_routes)
+    if not rows:
+        return ""
+    flag = {"partial": " · ⚠ partial", "unresolved": " · ? unresolved", "ok": ""}
+    L = ["### 🌐 Shared egress (fan-in)\n",
+         "_Endpoints funnelling through the same outbound call — verify the destination once, "
+         "not once per route._\n"]
+    for g in rows[:cap]:
+        routes = g["routes"]
+        L.append(f"- **{g['count']} endpoints → `{g['dest']}`**{flag[g['status']]}")
+        L.append("    " + ", ".join(f"`{r}`" for r in routes[:12]) + (" …" if len(routes) > 12 else ""))
+    return "\n".join(L)
+
+
 def parse_changed_lines(diff_text):
     """Right-side (head) line numbers present in a unified diff, keyed by file path.
 
@@ -501,6 +550,8 @@ def render(changes, meta):
         L.append(meta["deps_section"])
     if meta.get("inv_section"):
         L.append(meta["inv_section"])
+    if meta.get("egress_section"):
+        L.append(meta["egress_section"])
     buckets = {CRIT: [], HIGH: [], MED: [], LOW: []}
     for c in changes:
         buckets[c["sev"]].append(c)
@@ -624,7 +675,7 @@ def build_review(changes, findings, meta, changed=None):
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
             "shortstat": meta["shortstat"], "summary": meta.get("summary", ""),
             "invariants": findings or [], "contradictions": meta.get("contradictions", []),
-            "dependencies": meta.get("dependencies", []),
+            "dependencies": meta.get("dependencies", []), "egress": meta.get("egress", []),
             "changed_lines": changed or {}, "changes": [cd(c) for c in changes]}
 
 
@@ -923,9 +974,13 @@ def run_review(repo, base=None, head=None, merge=None, pr=None, commit=None, inv
     changed = changed_lines(repo, b, h)              # head-side lines a PR comment can anchor to
     contradictions = intent_contradictions(title, changes, findings, body=body)
     deps_findings = dependency_findings(repo, b, h)
+    egress_groups = shared_external_destinations(head_eps)
+    changed_routes = {c["route"] for c in changes}
     meta = dict(title=title, base=b, head=h, shortstat=shortstat, inv_section=inv_section,
                 intent_section=render_intent_section(contradictions), contradictions=contradictions,
                 deps_section=deps_mod.render_deps_section(deps_findings), dependencies=deps_findings,
+                egress_section=render_egress_section(egress_groups, only_routes=changed_routes),
+                egress=egress_payload(egress_groups, only_routes=changed_routes),
                 summary=intent_summary(changes, findings))
     return dict(review=build_review(changes, findings, meta, changed), report=render(changes, meta),
                 findings=findings, changes=changes, n_base=len(base_eps), n_head=len(head_eps),

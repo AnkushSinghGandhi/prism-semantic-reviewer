@@ -709,16 +709,19 @@ def _score_external(agg) -> Edge:
     if not agg.external:
         return Edge(NA)
     seen = {}
-    via = cfg = unk = False
+    via = cfg = partial = unk = False
     for r, d, f, ln in agg.external:
         via = via or "via call" in d
         clean = d.replace(" (via call)", "")
         cfg = cfg or clean.startswith("settings.")
-        unk = unk or clean.startswith("?")
+        unk = unk or clean == "?"           # nothing at all resolved → blunt ?
+        partial = partial or "{" in clean   # host/path with a runtime {placeholder} → known-but-partial
         _first_loc(seen, f"{r} -> {d}", f, ln)
     items = [f"{fact} @ {loc}" for fact, loc in seen.items()]
-    status = POTENTIAL if (via or cfg or unk) else VERIFIED
+    # never a clean ✓ when the destination isn't fully pinned down: verify by hand.
+    status = POTENTIAL if (via or cfg or partial or unk) else VERIFIED
     note = "; ".join(x for x in ["indirect" if via else "", "host in settings" if cfg else "",
+                                 "dest partially resolved" if partial else "",
                                  "dest unresolved" if unk else ""] if x)
     return Edge(status, items, note=note)
 

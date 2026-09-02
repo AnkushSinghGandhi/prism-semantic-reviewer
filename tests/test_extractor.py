@@ -97,3 +97,29 @@ def test_external_dest_unresolvable_stays_unknown():
            "def send():\n"
            "    requests.post(build_url())\n")
     assert _external_dests(src) == ["?"]
+
+
+def _external_status(src):
+    from extractor.analyzer import _score_external
+    fc = FactCollector("m.py")
+    fc.visit(ast.parse(src))
+    agg = FactCollector("m.py")
+    agg.external = fc.external
+    return _score_external(agg).status
+
+
+def test_external_status_partial_dest_is_not_verified():
+    # a {placeholder} host (runtime-dependent) is known-but-partial → ⚠, never a clean ✓
+    src = ("import requests\n"
+           "from django.conf import settings\n"
+           "def send():\n"
+           "    url = 'https://x' + settings.Y + '/send'\n"
+           "    requests.post(url)\n")
+    assert _external_status(src) == "⚠"
+
+
+def test_external_status_literal_dest_is_verified():
+    src = ("import requests\n"
+           "def send():\n"
+           "    requests.post('https://api.stripe.com/v1/charges')\n")
+    assert _external_status(src) == "✓"

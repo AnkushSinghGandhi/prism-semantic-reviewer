@@ -23,6 +23,8 @@
   .summary:empty{display:none}
   .tally{display:flex;gap:12px;margin-top:6px;font-size:12.5px}
   .inv{margin:12px 18px 0;border:1px solid var(--crit);border-radius:8px;background:rgba(248,81,73,.08)}
+  .inv.info{border-color:var(--line);background:rgba(88,166,255,.06)}
+  .inv .det a{color:var(--link);text-decoration:none}.inv .det a:hover{text-decoration:underline}
   .inv h2{margin:0;padding:9px 13px;font-size:13px;border-bottom:1px solid var(--line)}
   .inv .row{padding:8px 13px;border-bottom:1px solid var(--line)}.inv .row:last-child{border-bottom:0}
   .inv .det{color:var(--mut);font-size:12px;margin-top:2px}
@@ -384,7 +386,19 @@ function render(){
     alerts.map(f=>`<div class="row"><div><b>${f.sev} ${f.kind}</b> — ${esc(f.stmt)}</div>`+
       (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
       (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")+`</div>` : "";
-  document.getElementById("invwrap").innerHTML = contraHtml + depsHtml + invHtml;
+  const egress=(DATA.egress||[]);              // #4 — endpoints funnelling through one destination
+  const routeIdx={}; DATA.changes.forEach((c,i)=>{routeIdx[c.route]=i;});
+  const eflag={partial:" · ⚠ partial (host has a runtime placeholder)",
+               unresolved:" · ? destination unresolved",ok:""};
+  const chip=r=>routeIdx[r]!==undefined
+    ? `<a href="#" onclick="selectChange(${routeIdx[r]});return false">${esc(r)}</a>`
+    : `<span class="mono" style="color:var(--mut)">${esc(r)}</span>`;
+  const egressHtml = egress.length ?
+    `<div class="inv info"><h2>🌐 Shared egress — ${egress.length} destination(s) reached by multiple endpoints (verify once, not per route)</h2>`+
+    egress.map(g=>`<div class="row"><div><b>${g.count} endpoints → <span class="mono">${esc(g.dest)}</span></b>`+
+      `<span style="color:var(--mut)">${eflag[g.status]||""}</span></div>`+
+      `<div class="det">`+g.routes.map(chip).join(", ")+`</div></div>`).join("")+`</div>` : "";
+  document.getElementById("invwrap").innerHTML = contraHtml + depsHtml + invHtml + egressHtml;
   const fbar=document.getElementById("filters"); fbar.innerHTML="";
   ["🔴","🟠","🟡","🟢"].forEach(s=>{const b=document.createElement("button");
     b.textContent=`${s} ${counts[s]||0}`; if(!active.has(s))b.classList.add("off");
@@ -396,6 +410,14 @@ function render(){
   const P=new URLSearchParams(location.search);
   if(P.has("open")){const i=+P.get("open")||0, c=DATA.changes[i]; if(c){sel=i;renderList();renderDetail(c);}}
   if(P.get("invariants")==="1") loadInvariants();
+}
+
+function selectChange(i){   // jump from a shared-egress route chip to that endpoint's flow graph
+  const c=DATA.changes[i];
+  if(!c) return;
+  if(!active.has(c.sev)){active.add(c.sev);render();}   // unhide its severity if filtered out
+  sel=i; renderList(); renderDetail(c);
+  document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"nearest"});
 }
 
 function renderList(){

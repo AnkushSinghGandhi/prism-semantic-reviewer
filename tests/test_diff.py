@@ -1,9 +1,17 @@
 """The semantic diff: added/removed endpoints and severity. We build a 'base' by filtering the
 analyzed 'head' endpoints — that exercises the real diff() code path without a second fixture."""
+from types import SimpleNamespace
+
 from conftest import BLOG
 from extractor import analyze_repo
 from diff_pr import (diff, parse_changed_lines, build_review, build_sarif, intent_summary,
-                     parse_intent, intent_contradictions, mermaid_sequence)
+                     parse_intent, intent_contradictions, mermaid_sequence,
+                     shared_external_destinations, render_egress_section)
+
+
+def _ep(route, ext_items):
+    E = lambda its: SimpleNamespace(items=its)
+    return SimpleNamespace(route=route, e3_db_tables=E([]), e4_external=E(ext_items), e5_async=E([]))
 
 
 def test_new_unauth_write_endpoint_is_critical():
@@ -201,3 +209,22 @@ def test_sarif_in_diff_flag_tracks_changed_lines():
             changed.setdefault(path, []).append(int(line))
     on = build_sarif(build_review(changes, [], meta, changed=changed))
     assert any(r["properties"]["in-diff"] for r in on["runs"][0]["results"])
+
+
+def test_shared_external_destinations_groups_by_dest():
+    # two endpoints hit the same destination from different call sites → one group; a unique one drops
+    eps = [
+        _ep("a", ["requests.post -> mailer{X}/send @ f.py:1"]),
+        _ep("b", ["requests.post -> mailer{X}/send @ g.py:9"]),
+        _ep("c", ["requests.post -> https://only.me @ h.py:2"]),
+    ]
+    assert shared_external_destinations(eps) == [("mailer{X}/send", ["a", "b"])]
+
+
+def test_render_egress_flags_partial_and_filters_routes():
+    eps = [_ep("a", ["requests.post -> mailer{X}/send @ f.py:1"]),
+           _ep("b", ["requests.post -> mailer{X}/send @ g.py:9"])]
+    groups = shared_external_destinations(eps)
+    out = render_egress_section(groups, only_routes={"a"})
+    assert "2 endpoints" in out and "⚠ partial" in out
+    assert render_egress_section(groups, only_routes={"zzz"}) == ""   # touches no changed route → hidden
