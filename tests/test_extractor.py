@@ -55,6 +55,36 @@ def test_pii_flagged_potential_not_safe():
     assert co.e6_pii.status != "✓"
 
 
+def test_permission_classes_constant_resolves(tmp_path):
+    # `permission_classes = SOME_CONSTANT` (even imported) resolves to the real classes, not empty
+    from diff_pr import is_open
+    (tmp_path / "perms.py").write_text("PERMS = [ApiKeyPermission, IsAuthenticated]\nOPEN_PERMS = []\n")
+    (tmp_path / "views.py").write_text(
+        "from rest_framework.views import APIView\nfrom .perms import PERMS, OPEN_PERMS\n"
+        "class Guarded(APIView):\n    permission_classes = PERMS\n    def get(self, r): return None\n"
+        "class Wide(APIView):\n    permission_classes = OPEN_PERMS\n    def get(self, r): return None\n")
+    (tmp_path / "urls.py").write_text(
+        "from django.urls import path\nfrom .views import Guarded, Wide\n"
+        "urlpatterns = [path('g', Guarded.as_view()), path('w', Wide.as_view())]\n")
+    eps = {e.route: e for e in analyze_repo(str(tmp_path))}
+    guarded = " ".join(eps["g"].e2_auth.items)
+    assert "ApiKeyPermission" in guarded and "IsAuthenticated" in guarded
+    assert not is_open(eps["g"])                       # real perms → not open
+    assert is_open(eps["w"])                           # constant resolves to [] → open
+
+
+def test_permission_classes_unresolved_constant_is_unknown(tmp_path):
+    # a permission constant defined nowhere → honest UNKNOWN, never a silent empty/✓
+    (tmp_path / "views.py").write_text(
+        "from rest_framework.views import APIView\n"
+        "class V(APIView):\n    permission_classes = MYSTERY_PERMS\n    def get(self, r): return None\n")
+    (tmp_path / "urls.py").write_text(
+        "from django.urls import path\nfrom .views import V\nurlpatterns = [path('v', V.as_view())]\n")
+    v = next(e for e in analyze_repo(str(tmp_path)) if e.route == "v")
+    assert v.e2_auth.status == "?"
+    assert any("unresolved" in x for x in v.e2_auth.items)
+
+
 def test_drf_default_permission_is_open():
     ps = by_route(eps(), "api/stats")
     # no permission_classes + REST_FRAMEWORK without DEFAULT_PERMISSION_CLASSES → AllowAny (open)

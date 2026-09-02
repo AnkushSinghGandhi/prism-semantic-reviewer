@@ -213,17 +213,23 @@ def dependency_findings(repo, base, head):
     return findings
 
 
+def _open_item(x):
+    return "AllowAny" in x or x.startswith("permission_classes=[]")   # AllowAny or no permission classes
+
+
 def auth_str(ep):
     e = ep.e2_auth
     if e.status == "?":
         return "unspecified"
     if any("AllowAny" in x for x in e.items):
         return "open (AllowAny)"
+    if any(x.startswith("permission_classes=[]") for x in e.items):
+        return "open (no permission classes)"
     return " ".join(e.items) or "unspecified"
 
 
 def is_open(ep):
-    return ep.e2_auth.status == "?" or any("AllowAny" in x for x in ep.e2_auth.items)
+    return ep.e2_auth.status == "?" or any(_open_item(x) for x in ep.e2_auth.items)
 
 
 def index(eps):

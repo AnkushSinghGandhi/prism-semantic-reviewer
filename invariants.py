@@ -43,9 +43,13 @@ def ext_dests(ep):
     return out
 
 
+def _open_item(x):
+    return "AllowAny" in x or x.startswith("permission_classes=[]")   # AllowAny or no permission classes
+
+
 def authed(ep):
     e = ep.e2_auth
-    return e.status == "✓" and not any("AllowAny" in x for x in e.items)
+    return e.status == "✓" and not any(_open_item(x) for x in e.items)
 
 
 def auth_label(ep):
@@ -54,6 +58,8 @@ def auth_label(ep):
         return "auth unspecified"
     if any("AllowAny" in x for x in e.items):
         return "open (AllowAny)"
+    if any(x.startswith("permission_classes=[]") for x in e.items):
+        return "open (no permission classes)"
     return "authenticated"
 
 

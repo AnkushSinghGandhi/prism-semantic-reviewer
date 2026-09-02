@@ -102,6 +102,7 @@ class RepoIndex:
         self.module_consts: dict[str, dict] = {}   # file -> {NAME: folded string}
         self.global_consts: dict[str, str] = {}    # repo-wide URL constants (unambiguous only)
         self.class_models: dict[str, str] = {}     # Serializer/Form/etc. name -> its Meta.model table
+        self.perm_consts: dict[str, list] = {}     # PERMISSION_CONSTANT -> [class names] (unambiguous)
         self._build()
 
     def _iter_py(self):
@@ -112,7 +113,8 @@ class RepoIndex:
                     yield os.path.join(dirpath, fn)
 
     def _build(self):
-        seen, ambiguous = {}, set()        # for the repo-wide constant table
+        seen, ambiguous = {}, set()        # for the repo-wide string-constant table
+        pseen, pamb = {}, set()            # for the repo-wide permission-list constant table
         for path in self._iter_py():
             try:
                 src = open(path, encoding="utf-8").read()
@@ -129,6 +131,10 @@ class RepoIndex:
                 if name in seen and seen[name] != val:
                     ambiguous.add(name)                # same name, different value across files → drop
                 seen[name] = val
+            for name, lst in _module_perm_consts(tree).items():   # permission-list constants
+                if name in pseen and pseen[name] != lst:
+                    pamb.add(name)
+                pseen[name] = lst
             for node in ast.walk(tree):
                 if isinstance(node, ast.ClassDef):
                     self.classes.setdefault(node.name, []).append((node, path))
@@ -138,6 +144,7 @@ class RepoIndex:
                 elif isinstance(node, ast.FunctionDef):
                     self.funcs.setdefault(node.name, []).append((node, path))
         self.global_consts = {n: v for n, v in seen.items() if n not in ambiguous}
+        self.perm_consts = {n: v for n, v in pseen.items() if n not in pamb}
 
     def consts_for(self, file: str) -> dict:
         """String constants visible in `file`: the repo-wide table, with this module's own on top."""
@@ -611,6 +618,26 @@ def _fold_str(node, str_vars: dict) -> Optional[str]:
     return None
 
 
+def _perm_list_of(node):
+    """`[Perm1, Perm2]` / `(Perm1,)` → ['Perm1', 'Perm2']; None if not a list/tuple of names."""
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return [e.id if isinstance(e, ast.Name) else _dotted(e) for e in node.elts]
+    return None
+
+
+def _module_perm_consts(tree):
+    """Module-level `NAME = [ ... ]` list constants, so `permission_classes = SOME_CONSTANT`
+    resolves to the real classes instead of showing empty."""
+    out = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name):
+            lst = _perm_list_of(node.value)
+            if lst is not None:
+                out[node.targets[0].id] = lst
+    return out
+
+
 def _class_meta_model(classdef):
     """The `model = X` inside a class's inner `class Meta:` — the table a ModelSerializer/ModelForm
     actually writes to. Returns the model name or None."""
@@ -703,11 +730,14 @@ def _auth_of(cls: ast.ClassDef, index=None, _seen=None):
         if isinstance(n, ast.Assign):
             for t in n.targets:
                 if isinstance(t, ast.Name) and t.id in {"permission_classes", "authentication_classes"}:
-                    names = []
-                    if isinstance(n.value, (ast.List, ast.Tuple)):
-                        for e in n.value.elts:
-                            names.append(e.id if isinstance(e, ast.Name) else _dotted(e))
-                    found = (found or []) + [f"{t.id}={names}"]
+                    lst = _perm_list_of(n.value)                       # a literal [Perm, …]
+                    if lst is None and isinstance(n.value, ast.Name) and index is not None:
+                        lst = index.perm_consts.get(n.value.id)        # resolve `= SOME_CONSTANT`
+                    if lst is not None:                                # resolved (possibly to empty)
+                        found = (found or []) + [f"{t.id}={lst}"]
+                    else:                                              # a constant/expr we can't read
+                        ref = n.value.id if isinstance(n.value, ast.Name) else "?"
+                        found = (found or []) + [f"{t.id}=<{ref}> unresolved"]
     if found is not None or index is None:
         return found
     # walk base classes defined in the repo (custom base views may set permissions)
@@ -750,8 +780,14 @@ def analyze_handler(name: str, index: RepoIndex) -> Endpoint:
 
     # E2 auth — explicit on class/base, else the resolved DRF default, else unknown
     if auth is not None:
-        allow_all = any("AllowAny" in a for a in auth)
-        ep.e2_auth = Edge(VERIFIED, auth, note="explicitly open" if allow_all else "")
+        unresolved = any("unresolved" in a for a in auth)
+        open_empty = any(a.startswith("permission_classes=[]") for a in auth)   # no perms → open
+        allow_all = any("AllowAny" in a for a in auth) or open_empty
+        if unresolved:
+            ep.e2_auth = Edge(UNKNOWN, auth, note="permission_classes set to an unresolved constant — verify")
+        else:
+            ep.e2_auth = Edge(VERIFIED, auth, note="open — no permission classes" if open_empty
+                              else ("explicitly open" if allow_all else ""))
     elif index.default_permissions is not None:
         dp = index.default_permissions
         ep.e2_auth = Edge(VERIFIED, [f"DEFAULT_PERMISSION_CLASSES={dp}"],
