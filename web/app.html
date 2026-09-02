@@ -38,6 +38,7 @@
   .filters{padding:9px 13px;border-bottom:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
   .filters button{border-radius:14px;padding:3px 10px;font-size:12px}.filters button.off{opacity:.4}
   .filters .fsep{width:1px;align-self:stretch;background:var(--line);margin:0 3px}
+  .filters .fsearch{border-radius:14px;padding:3px 10px;font-size:12px;width:130px}
   .filters .flbl{color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
   .item{padding:10px 13px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:9px}
   .item:hover{background:var(--panel)}.item.sel{background:#1f2937;border-left:3px solid var(--link);padding-left:10px}
@@ -204,7 +205,42 @@ const COL={crit:"var(--crit)",high:"var(--high)",med:"var(--med)",low:"var(--low
 const active=new Set(["🔴","🟠","🟡","🟢"]);                     // severity (all shown by default)
 const activeKind=new Set(["NEW","CHANGED","REMOVED","REFACTOR"]); // change kind (all shown by default)
 const activeOps=new Set();   // touches: read/write/external/async — empty = no filter (show all)
-let DATA=null, sel=null, tab="graph", graphZoom=1, REFS=null;
+let DATA=null, sel=null, tab="graph", graphZoom=1, REFS=null, searchText="";
+const LS_KEY="pryti.ui";
+let panelState={};                                  // panel key -> open(bool), remembered across reviews
+try{ const s=JSON.parse(localStorage.getItem(LS_KEY)||"{}"); if(s.panels) panelState=s.panels; }catch(e){}
+
+function _saveUI(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(
+    {sev:[...active], kind:[...activeKind], ops:[...activeOps], q:searchText, panels:panelState})); }catch(e){}
+}
+function _syncURL(){                                 // shareable filtered view: only encode non-defaults
+  const p=new URLSearchParams(location.search);
+  ["fsev","fkind","fops","fq"].forEach(k=>p.delete(k));
+  if(active.size<4)     p.set("fsev",[...active].join(","));
+  if(activeKind.size<4) p.set("fkind",[...activeKind].join(","));
+  if(activeOps.size)    p.set("fops",[...activeOps].join(","));
+  if(searchText)        p.set("fq",searchText);
+  history.replaceState(null,"",location.pathname+(p.toString()?"?"+p.toString():""));
+}
+function persistFilters(){ _saveUI(); _syncURL(); }
+function panelToggle(key,isOpen){ panelState[key]=isOpen; _saveUI(); }
+
+// restore filters on load: URL (a shared link) wins, else localStorage, else defaults
+function applyStoredFilters(){
+  const p=new URLSearchParams(location.search);
+  let src;
+  if(["fsev","fkind","fops","fq"].some(k=>p.has(k))){
+    src={sev:p.get("fsev"), kind:p.get("fkind"), ops:p.get("fops"), q:p.get("fq")};
+  }else{
+    try{ const ls=JSON.parse(localStorage.getItem(LS_KEY)||"{}");
+      src={sev:ls.sev&&ls.sev.join(","), kind:ls.kind&&ls.kind.join(","),
+           ops:ls.ops&&ls.ops.join(","), q:ls.q}; }catch(e){ src={}; }
+  }
+  const apply=(set,val)=>{ if(val!=null){ set.clear(); val.split(",").filter(Boolean).forEach(x=>set.add(x)); } };
+  apply(active, src.sev); apply(activeKind, src.kind); apply(activeOps, src.ops);
+  if(typeof src.q==="string") searchText=src.q;
+}
 
 // path-relative base so it works at "/" or under a sub-path like "/pryti"; token from URL
 const BASE=location.pathname.endsWith("/")?location.pathname:location.pathname+"/";
@@ -276,7 +312,7 @@ function renderInvPanel(d){
       `<div style="margin-top:6px">${act}${blame}</div><div class="det mono" id="blame-${esc(c.id).replace(/[^a-z-]/gi,'_')}"></div></div>`;
   }).join("");
   document.getElementById("invpanel").innerHTML=
-    panel("", true, "⚖ Invariants — confirm the rules this codebase already follows",
+    panel("inv-discovery", "", true, "⚖ Invariants — confirm the rules this codebase already follows",
       rows||`<div class="det">no candidate invariants discovered</div>`);
 }
 async function confirmInv(id){
@@ -399,12 +435,15 @@ async function review(){
 }
 
 // a collapsible summary panel (native <details>); `open` sets the default state
-function panel(cls, open, title, body){
-  return `<details class="inv${cls?" "+cls:""}"${open?" open":""}><summary>${title}</summary>${body}</details>`;
+function panel(key, cls, open, title, body){
+  const isOpen = (key in panelState) ? panelState[key] : open;   // remembered collapse state
+  return `<details class="inv${cls?" "+cls:""}" data-pk="${key}"${isOpen?" open":""}`+
+    ` ontoggle="panelToggle('${key}',this.open)"><summary>${title}</summary>${body}</details>`;
 }
 
 function render(){
   document.body.classList.add("loaded");   // swap the welcome screen for the results layout
+  applyStoredFilters();                     // restore filters from URL / localStorage (sticky across reviews)
   document.getElementById("summary").textContent = DATA.summary || "";
   const counts={}; DATA.changes.forEach(c=>counts[c.sev]=(counts[c.sev]||0)+1);
   document.getElementById("tally").innerHTML=
@@ -412,15 +451,15 @@ function render(){
     +`<span style="color:var(--mut)">${DATA.changes.length} semantic changes</span>`;
   const contra=DATA.contradictions||[];         // intent-vs-behavior (feature #4)
   const contraHtml = contra.length ?
-    panel("", true, `🎭 Intent vs. behavior — PR describes itself as “${esc(contra[0].claim)}”, but the facts disagree`,
+    panel("contra", "", true, `🎭 Intent vs. behavior — PR describes itself as “${esc(contra[0].claim)}”, but the facts disagree`,
       contra.map(c=>`<div class="row"><div>${c.sev} ${esc(c.why).replace(/\x60/g,"")}</div></div>`).join("")) : "";
   const deps=(DATA.dependencies||[]).filter(d=>(d.gained&&d.gained.length)||d.unresolved);   // feature #5
   const depsHtml = deps.length ?
-    panel("", false, `📦 Dependency capability changes (${deps.length})`,
+    panel("deps", "", false, `📦 Dependency capability changes (${deps.length})`,
       deps.map(d=>`<div class="row"><div>${d.unresolved?"⚠":d.sev} <b>${esc(d.name)} ${esc(d.old||"(new)")}→${esc(d.new)}</b> — ${esc(d.why)}</div></div>`).join("")) : "";
   const alerts=(DATA.invariants||[]).filter(f=>["NEW VIOLATION","WEAKENING"].includes(f.kind));
   const invHtml = alerts.length ?
-    panel("", true, `🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR`,
+    panel("alerts", "", true, `🛡 ${alerts.length} invariant alert(s) — a confirmed property is affected by this PR`,
       alerts.map(f=>`<div class="row"><div><b>${f.sev} ${f.kind}</b> — ${esc(f.stmt)}</div>`+
       (f.detail?`<div class="det">${esc(f.detail)}</div>`:"")+
       (f.locs||[]).map(l=>`<div class="det mono">${esc(l)}</div>`).join("")+`</div>`).join("")) : "";
@@ -432,7 +471,7 @@ function render(){
     ? `<a href="#" onclick="selectChange(${routeIdx[r]});return false">${esc(r)}</a>`
     : `<span class="mono" style="color:var(--mut)">${esc(r)}</span>`;
   const egressHtml = egress.length ?
-    panel("info", false, `🌐 Shared egress — ${egress.length} destination(s) reached by multiple endpoints (verify once, not per route)`,
+    panel("egress", "info", false, `🌐 Shared egress — ${egress.length} destination(s) reached by multiple endpoints (verify once, not per route)`,
       egress.map(g=>`<div class="row"><div><b>${g.count} endpoints → <span class="mono">${esc(g.dest)}</span></b>`+
       `<span style="color:var(--mut)">${eflag[g.status]||""}</span></div>`+
       `<div class="det">`+g.routes.map(chip).join(", ")+`</div></div>`).join("")) : "";
@@ -455,6 +494,7 @@ function selectChange(i){   // jump from a shared-egress route chip to that endp
 
 function kindKey(k){return k.split(" ")[0];}   // "NEW ENDPOINT"→"NEW", "CHANGED"→"CHANGED", …
 function passFilters(c){
+  if(searchText && !c.route.toLowerCase().includes(searchText.toLowerCase())) return false;   // route search
   if(!active.has(c.sev)) return false;                 // severity bar
   if(!activeKind.has(kindKey(c.kind))) return false;   // change-kind bar
   if(activeOps.size){                                  // touches bar (additive; empty = off)
@@ -476,7 +516,11 @@ function renderFilters(){
   const mk=(label,off,fn)=>{const b=document.createElement("button");if(off)b.className="off";b.textContent=label;b.onclick=fn;return b;};
   const sep=()=>{const s=document.createElement("span");s.className="fsep";fb.appendChild(s);};
   const lbl=t=>{const s=document.createElement("span");s.className="flbl";s.textContent=t;fb.appendChild(s);};
-  const toggle=(set,key)=>{set.has(key)?set.delete(key):set.add(key);renderFilters();};
+  const toggle=(set,key)=>{set.has(key)?set.delete(key):set.add(key);persistFilters();renderFilters();};
+  const search=document.createElement("input");     // route search — filters the list, keeps focus
+  search.type="search"; search.placeholder="🔎 route…"; search.value=searchText; search.className="fsearch";
+  search.oninput=()=>{ searchText=search.value.trim(); persistFilters(); renderList(); };
+  fb.appendChild(search); sep();
   ["🔴","🟠","🟡","🟢"].forEach(s=>fb.appendChild(mk(`${s} ${sv[s]||0}`, !active.has(s), ()=>toggle(active,s))));
   sep();
   [["NEW","🆕 new"],["CHANGED","✳ changed"],["REMOVED","➖ removed"],["REFACTOR","♻ refactor"]].forEach(([k,t])=>{
