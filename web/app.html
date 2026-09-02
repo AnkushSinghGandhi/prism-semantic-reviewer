@@ -30,8 +30,10 @@
   .inv .det{color:var(--mut);font-size:12px;margin-top:2px}
   main{display:grid;grid-template-columns:minmax(320px,400px) 1fr;height:calc(100vh - 132px)}
   #list{border-right:1px solid var(--line);overflow:auto}
-  .filters{padding:9px 13px;border-bottom:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap}
+  .filters{padding:9px 13px;border-bottom:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
   .filters button{border-radius:14px;padding:3px 10px;font-size:12px}.filters button.off{opacity:.4}
+  .filters .fsep{width:1px;align-self:stretch;background:var(--line);margin:0 3px}
+  .filters .flbl{color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
   .item{padding:10px 13px;border-bottom:1px solid var(--line);cursor:pointer;display:flex;gap:9px}
   .item:hover{background:var(--panel)}.item.sel{background:#1f2937;border-left:3px solid var(--link);padding-left:10px}
   .dot{width:9px;height:9px;border-radius:50%;margin-top:6px;flex:0 0 auto}
@@ -193,7 +195,9 @@
 <script>
 const SEV={"🔴":"crit","🟠":"high","🟡":"med","🟢":"low"};
 const COL={crit:"var(--crit)",high:"var(--high)",med:"var(--med)",low:"var(--low)"};
-const active=new Set(["🔴","🟠","🟡","🟢"]);
+const active=new Set(["🔴","🟠","🟡","🟢"]);                     // severity (all shown by default)
+const activeKind=new Set(["NEW","CHANGED","REMOVED","REFACTOR"]); // change kind (all shown by default)
+const activeOps=new Set();   // touches: read/write/external/async — empty = no filter (show all)
 let DATA=null, sel=null, tab="graph", graphZoom=1, REFS=null;
 
 // path-relative base so it works at "/" or under a sub-path like "/pryti"; token from URL
@@ -422,12 +426,7 @@ function render(){
       `<span style="color:var(--mut)">${eflag[g.status]||""}</span></div>`+
       `<div class="det">`+g.routes.map(chip).join(", ")+`</div></div>`).join("")+`</div>` : "";
   document.getElementById("invwrap").innerHTML = contraHtml + depsHtml + invHtml + egressHtml;
-  const fbar=document.getElementById("filters"); fbar.innerHTML="";
-  ["🔴","🟠","🟡","🟢"].forEach(s=>{const b=document.createElement("button");
-    b.textContent=`${s} ${counts[s]||0}`; if(!active.has(s))b.classList.add("off");
-    b.onclick=()=>{active.has(s)?active.delete(s):active.add(s);b.classList.toggle("off");renderList();};
-    fbar.appendChild(b);});
-  renderList();
+  renderFilters();
   document.getElementById("detail").innerHTML='<div class="empty">Select a change.</div>';
   // deep links: ?open=N selects a change (shows its flow graph), ?invariants=1 opens the panel
   const P=new URLSearchParams(location.search);
@@ -438,18 +437,56 @@ function render(){
 function selectChange(i){   // jump from a shared-egress route chip to that endpoint's flow graph
   const c=DATA.changes[i];
   if(!c) return;
-  if(!active.has(c.sev)){active.add(c.sev);render();}   // unhide its severity if filtered out
-  sel=i; renderList(); renderDetail(c);
+  active.add(c.sev); activeKind.add(kindKey(c.kind)); activeOps.clear();  // unhide it if filtered out
+  sel=i; renderFilters(); renderDetail(c);
   document.getElementById("detail").scrollIntoView({behavior:"smooth",block:"nearest"});
 }
 
+function kindKey(k){return k.split(" ")[0];}   // "NEW ENDPOINT"→"NEW", "CHANGED"→"CHANGED", …
+function passFilters(c){
+  if(!active.has(c.sev)) return false;                 // severity bar
+  if(!activeKind.has(kindKey(c.kind))) return false;   // change-kind bar
+  if(activeOps.size){                                  // touches bar (additive; empty = off)
+    const o=c.ops||{}; let hit=false; activeOps.forEach(k=>{ if(o[k]) hit=true; });
+    if(!hit) return false;
+  }
+  return true;
+}
+
+// three filter bars: severity + change-kind (both default all-on), and touches (additive, default off)
+function renderFilters(){
+  const fb=document.getElementById("filters"); fb.innerHTML="";
+  const sv={}, kd={}, op={read:0,write:0,external:0,async:0};
+  DATA.changes.forEach(c=>{
+    sv[c.sev]=(sv[c.sev]||0)+1;
+    const k=kindKey(c.kind); kd[k]=(kd[k]||0)+1;
+    const o=c.ops||{}; ["read","write","external","async"].forEach(x=>{ if(o[x]) op[x]++; });
+  });
+  const mk=(label,off,fn)=>{const b=document.createElement("button");if(off)b.className="off";b.textContent=label;b.onclick=fn;return b;};
+  const sep=()=>{const s=document.createElement("span");s.className="fsep";fb.appendChild(s);};
+  const lbl=t=>{const s=document.createElement("span");s.className="flbl";s.textContent=t;fb.appendChild(s);};
+  const toggle=(set,key)=>{set.has(key)?set.delete(key):set.add(key);renderFilters();};
+  ["🔴","🟠","🟡","🟢"].forEach(s=>fb.appendChild(mk(`${s} ${sv[s]||0}`, !active.has(s), ()=>toggle(active,s))));
+  sep();
+  [["NEW","🆕 new"],["CHANGED","✳ changed"],["REMOVED","➖ removed"],["REFACTOR","♻ refactor"]].forEach(([k,t])=>{
+    if(!kd[k]) return;                                 // only offer kinds that are present
+    fb.appendChild(mk(`${t} ${kd[k]}`, !activeKind.has(k), ()=>toggle(activeKind,k)));
+  });
+  sep(); lbl("touches");
+  [["read","📖 read"],["write","✏ write"],["external","🌐 external"],["async","⏱ async"]].forEach(([k,t])=>{
+    fb.appendChild(mk(`${t} ${op[k]}`, !activeOps.has(k), ()=>toggle(activeOps,k)));
+  });
+  renderList();
+}
+
 function renderList(){
-  const box=document.getElementById("items"); box.innerHTML="";
-  DATA.changes.forEach((c,idx)=>{ if(!active.has(c.sev))return;
+  const box=document.getElementById("items"); box.innerHTML=""; let shown=0;
+  DATA.changes.forEach((c,idx)=>{ if(!passFilters(c))return; shown++;
     const d=document.createElement("div"); d.className="item"+(sel===idx?" sel":"");
     d.innerHTML=`<span class="dot" style="background:${COL[SEV[c.sev]]}"></span>`+
       `<div><div class="kind">${c.kind}</div><div class="route mono">${esc(c.route)}</div></div>`;
     d.onclick=()=>{sel=idx;renderList();renderDetail(c);}; box.appendChild(d);});
+  if(!shown) box.innerHTML='<div class="empty">No endpoints match the current filters.</div>';
 }
 
 function renderDetail(c){

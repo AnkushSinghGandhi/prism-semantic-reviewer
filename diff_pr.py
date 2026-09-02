@@ -252,6 +252,15 @@ def unknowns(ep):
     return out
 
 
+def ops_of(ep):
+    """What an endpoint touches — booleans over the lens facts, for the web list filters."""
+    kinds = {x.split(":", 1)[1] for x in items(ep, "e3_db_tables") if ":" in x}   # {"read","write"}
+    return {"read": any(k.startswith("read") for k in kinds),
+            "write": any(k.startswith("write") for k in kinds),
+            "external": bool(items(ep, "e4_external")),
+            "async": bool(items(ep, "e5_async"))}
+
+
 def diff(base_eps, head_eps):
     base, head = index(base_eps), index(head_eps)
     changes = []
@@ -670,7 +679,7 @@ def build_review(changes, findings, meta, changed=None):
             graph = _state_all(build_graph(ep), "added")   # NEW ENDPOINT → all new
         return {"sev": c["sev"], "kind": c["kind"], "route": c["route"], "why": c["why"],
                 "detail": c.get("detail", ""), "auth": auth_str(ep), "flow": flow(ep),
-                "blast": c.get("blast", 0),
+                "blast": c.get("blast", 0), "ops": ops_of(ep),
                 "investigate": investigate, "unknowns": unknowns(ep), "graph": graph}
     return {"title": meta["title"], "base": meta["base"], "head": meta["head"],
             "shortstat": meta["shortstat"], "summary": meta.get("summary", ""),

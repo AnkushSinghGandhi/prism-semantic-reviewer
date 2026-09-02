@@ -211,6 +211,26 @@ def test_sarif_in_diff_flag_tracks_changed_lines():
     assert any(r["properties"]["in-diff"] for r in on["runs"][0]["results"])
 
 
+def test_ops_of_flags_read_write_external_async():
+    from diff_pr import ops_of
+    by = {e.route: ops_of(e) for e in analyze_repo(BLOG)}
+    orders = next(v for k, v in by.items() if "api/orders" in k)
+    assert orders == {"read": True, "write": True, "external": True, "async": True}
+    stats = next(v for k, v in by.items() if "api/stats" in k)
+    assert stats["read"] and not stats["write"] and not stats["external"]
+    ow = next(v for k, v in by.items() if "open-write" in k)
+    assert ow["write"] and not ow["read"]
+
+
+def test_review_payload_carries_ops():
+    head = analyze_repo(BLOG)
+    base = [e for e in head if "open-write" not in e.route]
+    meta = dict(title="t", base="b", head="h", shortstat="")
+    rv = build_review(diff(base, head), [], meta, changed={})
+    assert all("ops" in c and set(c["ops"]) == {"read", "write", "external", "async"}
+               for c in rv["changes"])
+
+
 def test_shared_external_destinations_groups_by_dest():
     # two endpoints hit the same destination from different call sites → one group; a unique one drops
     eps = [
