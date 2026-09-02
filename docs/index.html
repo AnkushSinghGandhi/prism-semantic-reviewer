@@ -309,14 +309,15 @@ $ pryti review &lt;repo&gt; --pr 128 --invariants invariants.json   <span class=
 <!-- lens -->
 <section id="lens"><div class="wrap">
   <div class="eyebrow">The lens</div>
-  <h2>Six things it reads for every endpoint</h2>
+  <h2>Seven things it reads for every endpoint</h2>
   <p class="lead">It reads your code with Python's own parser — it never runs it — and reports <b>facts</b>, not guesses.</p>
   <table class="lens">
     <tr><td>route → handler</td><td>which URL maps to which view?</td></tr>
     <tr><td>auth</td><td>does it require a login / permission?</td></tr>
-    <tr><td>db tables</td><td>which tables does it read and write?</td></tr>
+    <tr><td>db tables</td><td>which tables does it read and write? — resolved to the real SQL table name</td></tr>
     <tr><td>external calls</td><td>does it call another service (payment, email, …)?</td></tr>
     <tr><td>async</td><td>does it kick off a background job / thread / signal?</td></tr>
+    <tr><td>cache</td><td>does it read or invalidate a cache key?</td></tr>
     <tr><td>PII</td><td>does personal data travel toward something that leaves the app?</td></tr>
   </table>
   <div class="pills">

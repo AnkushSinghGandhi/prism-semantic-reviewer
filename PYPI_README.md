@@ -103,9 +103,10 @@ Needs a `GITHUB_TOKEN` with org read access.
 ## What it detects (without running your code)
 
 - **API routes** (new / modified / removed) and their **auth level** (e.g. AllowAny vs Authenticated)
-- **Database reads & writes**
+- **Database reads & writes** — resolved to the real **SQL table** name
 - **External API calls** (Stripe, Twilio, PayTM, …)
 - **Async task dispatches** (Celery, threads, signals)
+- **Cache reads & invalidations** (Django cache: get / set / delete)
 - **PII egress** — personal data leaving the system
 
 Each fact is marked `✓ verified` / `⚠ potential` / `? unknown` — it never reports "safe" for

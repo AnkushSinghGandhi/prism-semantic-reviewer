@@ -226,15 +226,16 @@ stale.
 
 ## What it looks at (the "lens")
 
-For every HTTP endpoint it follows six **edges**:
+For every HTTP endpoint it follows seven **edges**:
 
 | Edge | Question |
 |------|----------|
 | **route → handler** | which URL maps to which view? |
 | **auth** | does it require login/permission? |
-| **db tables** | which tables does it read and write? |
+| **db tables** | which tables does it read and write? (resolved to the real SQL table name) |
 | **external calls** | does it call another service (payment, email, …)? |
 | **async** | does it kick off a background job / thread / signal? |
+| **cache** | does it read or invalidate a cache key? |
 | **PII** | does personal data travel toward something that leaves the app? |
 
 **It never pretends to be sure.** Every fact is `✓ verified` / `⚠ potential` (found via a call,
@@ -278,7 +279,7 @@ invariants.py  # pryti invariants — discover rules from git history
 digest.py      # pryti digest — org-wide roll-up from pryti:* labels (no GHAS needed)
 enforce.py     # check a PR against confirmed rules
 deps.py        # dependency capability-delta scan (bumped deps that gain new powers)
-extractor/     # reads code → facts (the 6-edge lens)
+extractor/     # reads code → facts (the 7-edge lens)
 gitutil.py     # git helpers (URL clone/cache, repo detection)
 cli.py         # the `pryti` entry point
 web/           # app.html (live UI + graph), viewer.template.html (offline report)

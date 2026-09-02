@@ -610,8 +610,9 @@ def render(changes, meta):
             L.append(f"- **unknown:** " + " · ".join(uk))
         L.append("")
     L.append("---")
-    L.append("_Blindspot: this diff sees routing/auth/db/external/async at the endpoint lens; "
-             "it does not see logic inside a function, ordering, concurrency, or off-by-one._")
+    L.append("_Blindspot: this diff sees routing, auth, db tables (+ their SQL table), external "
+             "calls, async, cache, and PII at the endpoint lens; it does not see logic inside a "
+             "function, ordering, concurrency, or off-by-one._")
     return "\n".join(L)
 
 
