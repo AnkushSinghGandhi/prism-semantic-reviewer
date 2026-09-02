@@ -1,7 +1,10 @@
 """The 6-edge lens on a fixture Django app. Pryti parses the fixtures with `ast`; it never
 imports or runs them, so Django/DRF don't need to be installed."""
+import ast
+
 from conftest import BLOG, facts, by_route
 from extractor import analyze_repo
+from extractor.analyzer import FactCollector
 
 
 def eps():
@@ -62,3 +65,35 @@ def test_explicit_allow_any_write_is_open():
     ow = by_route(eps(), "open-write")
     assert "AllowAny" in " ".join(ow.e2_auth.items)
     assert "Order:write" in facts(ow, "e3_db_tables")
+
+
+def _external_dests(src):
+    fc = FactCollector("m.py")
+    fc.visit(ast.parse(src))
+    return [dest for _root, dest, _f, _l in fc.external]
+
+
+def test_external_dest_folds_var_and_concat():
+    # `requests.post(url)` where url = 'lit' + settings.X + 'lit' → resolved, not a bare "?"
+    src = ("import requests\n"
+           "from django.conf import settings\n"
+           "def send():\n"
+           "    url = 'https://mailer-service' + settings.SESSION_DOMAIN_NAME + '/api/1/send'\n"
+           "    requests.post(url, data=1)\n")
+    assert _external_dests(src) == ["https://mailer-service{SESSION_DOMAIN_NAME}/api/1/send"]
+
+
+def test_external_dest_folds_fstring_var():
+    src = ("import requests\n"
+           "def send(base):\n"
+           "    url = f'{base}/hook'\n"
+           "    requests.post(url)\n")
+    assert _external_dests(src) == ["{base}/hook"]
+
+
+def test_external_dest_unresolvable_stays_unknown():
+    # a destination built from a function call is not guessed → honest "?"
+    src = ("import requests\n"
+           "def send():\n"
+           "    requests.post(build_url())\n")
+    assert _external_dests(src) == ["?"]

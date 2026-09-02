@@ -238,6 +238,7 @@ class FactCollector(ast.NodeVisitor):
         self.func_calls = []   # bare names called x(...)
         self.typed_calls = []  # (ClassName, method) called as Model.method(...)
         self.var_types = {}    # local var name -> Model (so `order.save()` → Order:write)
+        self.str_vars = {}     # local var name -> resolved string (so `requests.post(url)` names the dest)
         self.tainted = {}      # local var name -> {sensitive field labels it carries}
         self.leaks = []        # (field, sink, file, line): a tainted field that reaches an egress sink
 
@@ -260,7 +261,7 @@ class FactCollector(ast.NodeVisitor):
         if isinstance(f, ast.Attribute):
             root = _root_name(f.value)
             if root in EXTERNAL_ROOTS and f.attr in EXTERNAL_VERBS:
-                self.external.append((f"{root}.{f.attr}", _dest_of(node), fl, ln))
+                self.external.append((f"{root}.{f.attr}", _dest_of(node, self.str_vars), fl, ln))
         # async: threading.Thread(target=fn)
         if _is_threading_thread(f):
             tgt = _kw(node, "target")
@@ -305,6 +306,9 @@ class FactCollector(ast.NodeVisitor):
             model = self._model_of(node.value)
             if model:
                 self.var_types[node.targets[0].id] = model
+            val = _fold_str(node.value, self.str_vars)       # `url = 'x' + settings.Y` → resolve dest later
+            if val is not None:
+                self.str_vars[node.targets[0].id] = val
             labels = self._taint_labels(node.value)          # `email = user.email` → var is tainted
             if labels:
                 self.tainted[node.targets[0].id] = set(labels)
@@ -444,7 +448,49 @@ def _sink_label(f):
     return None
 
 
-def _dest_of(node: ast.Call) -> str:
+def _fold_str(node, str_vars: dict) -> Optional[str]:
+    """Best-effort static value of a string expression: literals, local vars (from `str_vars`),
+    `a + b` concatenation, and f-strings. Parts we can't pin down (a `settings.X`, an unknown name)
+    become a readable `{NAME}` placeholder — honest, not a guess. Returns None when nothing at all
+    is resolvable, so callers can fall back to `?`."""
+    if node is None:
+        return None
+    s = _const_str(node)
+    if s is not None:
+        return s
+    if isinstance(node, ast.Name):
+        return str_vars.get(node.id)
+    if isinstance(node, ast.Attribute):               # settings.SESSION_DOMAIN_NAME → {SESSION_DOMAIN_NAME}
+        return "{" + node.attr + "}"
+    if isinstance(node, ast.JoinedStr):               # f'{prefix}/send'
+        out = []
+        for part in node.values:
+            if isinstance(part, ast.Constant):
+                out.append(str(part.value))
+            elif isinstance(part, ast.FormattedValue):
+                out.append(_fold_str(part.value, str_vars) or _placeholder(part.value))
+            else:
+                out.append("{?}")
+        return "".join(out)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fold_str(node.left, str_vars)
+        right = _fold_str(node.right, str_vars)
+        if left is None and right is None:            # no literal/known anchor → stay honest "?"
+            return None
+        return (left or _placeholder(node.left)) + (right or _placeholder(node.right))
+    return None
+
+
+def _placeholder(node) -> str:
+    """A readable `{name}` stand-in for an expression part we can't fold to a literal."""
+    if isinstance(node, ast.Name):
+        return "{" + node.id + "}"
+    if isinstance(node, ast.Attribute):
+        return "{" + node.attr + "}"
+    return "{?}"
+
+
+def _dest_of(node: ast.Call, str_vars: dict = None) -> str:
     if node.args:
         a = node.args[0]
         if isinstance(a, ast.Attribute):          # settings.PAYTM_STATUS_URL
@@ -452,6 +498,9 @@ def _dest_of(node: ast.Call) -> str:
         s = _const_str(a)
         if s:
             return s
+        folded = _fold_str(a, str_vars or {})     # variable / 'x'+settings.Y / f-string
+        if folded:
+            return folded
     url_kw = _kw(node, "url")
     return url_kw or "?"
 
