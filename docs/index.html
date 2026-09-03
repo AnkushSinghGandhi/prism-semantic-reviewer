@@ -158,6 +158,24 @@
   .step h3{font-size:16px;margin-bottom:8px}
   .step pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px 14px;overflow:auto;font-size:13.5px;color:#a5d6ff}
 
+  /* flow diagram (code → facts → diff → surface) */
+  .flow{display:flex;align-items:stretch;margin-top:34px;flex-wrap:wrap;justify-content:center}
+  .flow .fbox{flex:1;min-width:210px;background:var(--panel);border:1.5px solid var(--line);border-radius:12px;padding:24px 18px;text-align:center}
+  .flow .fbox h4{font-size:21px;font-weight:800;margin-bottom:8px;letter-spacing:.3px}
+  .flow .fbox p{color:var(--muted);font-size:14px}
+  .flow .farr{display:flex;align-items:center;justify-content:center;color:var(--text);font-size:26px;padding:0 16px;flex:none}
+  @media(max-width:760px){.flow{flex-direction:column}.flow .farr{transform:rotate(90deg);padding:8px 0;align-self:center}}
+  /* colored level cards (contract: zero-code / declare / enforce) */
+  .lvl{border-top-width:3px;border-top-style:solid}
+  .lvl .tag{font-family:"SF Mono",ui-monospace,monospace;font-size:12.5px;color:var(--muted);margin:6px 0 10px;display:block}
+  .split{display:grid;grid-template-columns:1.15fr 1fr;gap:24px;margin-top:30px;align-items:center}
+  @media(max-width:820px){.split{grid-template-columns:1fr}}
+  .split .shot{margin-top:0}
+  .layerlist{list-style:none;padding:0;margin:0}
+  .layerlist li{padding:7px 0;color:var(--muted);font-size:15px;border-bottom:1px solid var(--line)}
+  .layerlist li:last-child{border-bottom:0}
+  .layerlist b{color:var(--text)}
+
   footer{border-top:1px solid var(--line);padding:40px 0 60px;color:var(--muted);font-size:14px}
   footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:16px}
   footer a{color:var(--muted)}footer a:hover{color:var(--text)}
@@ -171,6 +189,7 @@
   <div class="links">
     <a href="#how">How it works</a>
     <a href="#ecosystem">Ecosystem</a>
+    <a href="#contract">Contract</a>
     <a href="#lens">The lens</a>
     <a href="docs.html">Docs</a>
     <a class="btn ghost" href="https://github.com/AnkushSinghGandhi/pryti-semantic-reviewer">GitHub</a>
@@ -246,6 +265,29 @@ $ pryti review &lt;repo&gt; --pr 128 --invariants invariants.json   <span class=
   <p class="lead" style="margin-top:16px">On its own the reviewer <i>guesses</i> your invariants from git history. <b>pryti-contract</b> hands it the truth instead: your app's declared destinations become an <b>enforced allowlist</b>, so a brand-new domain sneaking into a PR is a <span class="c-crit">🔴 critical</span> alert — grounded in fact, not a hunch. <a href="docs.html">See the full docs →</a></p>
 </div></section>
 
+<!-- contract deep-dive -->
+<section id="contract"><div class="wrap">
+  <div class="eyebrow">pryti-contract · inside-out</div>
+  <h2>Your backend can't lie about what it does</h2>
+  <p class="lead">Static analysis can't see routers, loops, or mixins — but Django already resolved all of it at startup. So pryti-contract asks the running app instead of parsing files.</p>
+  <div class="grid g3">
+    <div class="card lvl" style="border-top-color:#58a6ff"><h3 style="color:#58a6ff">1 · Zero code</h3><span class="tag">pryti-contract export</span><p>Reads Django's real router + model registry → <code>contract.json</code>. Coverage reported, not hidden.</p></div>
+    <div class="card lvl" style="border-top-color:var(--accent)"><h3 style="color:var(--accent)">2 · Declare</h3><span class="tag">a decorator, done</span><p>Mark the routes + effects that matter — a decorator that looks like every Django one.</p></div>
+    <div class="card lvl" style="border-top-color:var(--low)"><h3 style="color:var(--low)">3 · Enforce</h3><span class="tag">the runtime guard</span><p>One hook at the socket layer: an undeclared call fails loudly. The bad code doesn't ship.</p></div>
+  </div>
+
+  <h2 style="margin-top:46px">3 bad things in. 0 shipped.</h2>
+  <p class="lead">A PR that "looks harmless" — caught on <b>two layers</b>: structural (the CI diff) and runtime (the guard).</p>
+  <div class="split">
+    <div class="shot"><img src="images/money-shot.png" alt="pryti-contract catching three bad things across CI and runtime"></div>
+    <ul class="layerlist">
+      <li><b style="color:#58a6ff">Layer 2 · CI diff</b> — auth <span class="c-crit">weakened</span> (user → public) and a model field <span class="c-crit">dropped</span> → <b>CI blocked</b> before merge.</li>
+      <li><b style="color:var(--low)">Layer 3 · runtime guard</b> — an <span class="c-crit">undeclared exfiltration</span> call <b style="color:var(--low)">blocked</b> before it ever left the process.</li>
+      <li>Structural mistakes → this. Logic mistakes → your tests. <b>You need both.</b></li>
+    </ul>
+  </div>
+</div></section>
+
 <!-- problem -->
 <section id="how"><div class="wrap">
   <div class="eyebrow">The problem</div>
@@ -267,6 +309,20 @@ $ pryti review &lt;repo&gt; --pr 128 --invariants invariants.json   <span class=
 <span class="c-low">🟢 REFACTOR</span>      <b>/api/users/profile</b>
    handler renamed, semantics unchanged — nothing to see
 </pre>
+  </div>
+</div></section>
+
+<!-- the idea -->
+<section id="idea"><div class="wrap">
+  <div class="eyebrow">The whole idea, in one line</div>
+  <h2>Code → <span style="color:var(--low)">facts</span> → diff → <span style="color:var(--accent)">show what matters</span></h2>
+  <p class="lead">No running your code. No guessing. Just Python's own parser (AST) reading structure — the same three boxes, small.</p>
+  <div class="flow">
+    <div class="fbox" style="border-color:#58a6ff"><h4 style="color:#58a6ff">ANALYZER</h4><p>code → behavior facts</p></div>
+    <div class="farr">→</div>
+    <div class="fbox" style="border-color:var(--accent)"><h4 style="color:var(--accent)">DIFFER</h4><p>facts → what changed</p></div>
+    <div class="farr">→</div>
+    <div class="fbox" style="border-color:var(--low)"><h4 style="color:var(--low)">SURFACE</h4><p>rank + point at the line</p></div>
   </div>
 </div></section>
 
