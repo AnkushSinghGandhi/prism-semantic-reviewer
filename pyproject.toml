@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pryti-semantic-reviewer"
-version = "0.4.0"
+version = "0.5.0"
 description = "Semantic PR Reviewer for Python Web Applications"
 readme = "PYPI_README.md"
 requires-python = ">=3.8"
